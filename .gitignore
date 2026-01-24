@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+
+# Data (large files - don't commit!)
+data/raw/
+data/processed/
+data/r4.2.tar.bz2
+*tar.bz2
+*.parquet
+*.duckdb
+*.duckdb.wal
+
+# Model artifacts (too large for git)
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Results and outputs
+results/
+data/outputs/
+*.jsonl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+#MD
+GIT_WORKFLOW.md
