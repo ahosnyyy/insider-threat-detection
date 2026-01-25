@@ -10,11 +10,13 @@ from .sessionize import (
 from .features import (
     FeatureExtractor, 
     SequenceBuilder, 
-    prepare_training_data,
-    prepare_training_data_temporal,
     NUMERIC_FEATURES,
     OPTIONAL_FEATURES,
     CATEGORICAL_FEATURES,
+)
+from .dataset import (
+    prepare_training_data,
+    prepare_training_data_temporal,
 )
 from .analyzer import (
     DataAnalyzer, 

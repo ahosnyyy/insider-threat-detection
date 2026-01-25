@@ -27,7 +27,7 @@ from src.data import get_session_dataframe, prepare_training_data
 from src.models import LSTMAutoencoder, TransformerAutoencoder
 from src.training import ModelEvaluator
 from src.training.metrics import compute_ttd
-from src.utils import setup_logging, load_ground_truth, save_json
+from src.utils import setup_logging, load_ground_truth, save_json, load_json
 
 
 def load_model(model_path: Path, model_type: str, feature_dim: int):
@@ -282,7 +282,10 @@ def main():
         # Save embeddings for Phase 2 (User Baselines)
         embedding_path = args.output.parent / f"embeddings_{model_type}.npy"
         np.save(embedding_path, embeddings)
-        print(f"  Embeddings saved: {embedding_path} shape={embeddings.shape}")
+        label_path = args.output.parent / f"labels_{model_type}.npy"
+        np.save(label_path, test_labels_session)
+        print(f"  Embeddings saved: {embedding_path}")
+        print(f"  Labels saved: {label_path}")
         
         # Compute metrics at session-level
         print("\nSession-Level Metrics (detecting specific malicious sessions):")
@@ -393,9 +396,20 @@ def main():
         m = r['user_level']
         print(f"{name:<15} {m['auc_roc']:>10.4f} {m['precision']:>10.4f} {m['recall']:>10.4f} {m['f1_score']:>10.4f}")
     
-    # Save results
+    # Save results (merge with existing)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    save_json(results, args.output)
+    
+    final_results = results
+    if args.output.exists():
+        try:
+            print(f"Merging with existing report at {args.output}")
+            old_results = load_json(args.output)
+            old_results.update(results)
+            final_results = old_results
+        except Exception as e:
+            print(f"Warning: Could not merge with existing results: {e}")
+            
+    save_json(final_results, args.output)
     
     print(f"\nEvaluation report saved to: {args.output}")
     
