@@ -50,6 +50,7 @@ def compute_reconstruction_errors(model, sequences, masks, device="cuda"):
     model.eval()
     
     errors = []
+    embeddings = []
     batch_size = 64
     
     with torch.no_grad():
@@ -334,6 +335,7 @@ def main():
             print(f"  Median Time:   {ttd_metrics['ttd_hours_median']:.1f} hours")
             print(f"  Mean Sessions: {ttd_metrics['ttd_sessions_mean']:.1f}")
             print(f"  Mean Lag:      {ttd_metrics['ttd_lag_mean']:.1f}%")
+            print(f"  Median Lag:    {ttd_metrics['ttd_lag_median']:.1f}%")
         else:
             print("  No incidents detected at this threshold.")
         

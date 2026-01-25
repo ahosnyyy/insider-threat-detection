@@ -124,6 +124,15 @@ def compute_ttd(
                 first_detection_idx = idx
                 break
         
+        # Base incident data
+        incident_data = {
+            'incident_start': str(incident_start),
+            'incident_end': str(incident_end),
+            'incident_duration_hours': incident_duration_hours,
+            'total_sessions': len(user_sessions),
+            'detected': False
+        }
+        
         if first_detection_idx is not None:
             first_detection_time = user_sessions[first_detection_idx]['timestamp']
             
@@ -132,8 +141,14 @@ def compute_ttd(
             ttd_hours = max(0, ttd_hours)  # Can't be negative
             ttd_hours_list.append(ttd_hours)
             
-            # Per-incident TTD
-            per_incident_ttd[user] = ttd_hours
+            # Update data with detection info
+            incident_data.update({
+                'detected': True,
+                'ttd_hours': ttd_hours,
+                'detected_at': str(first_detection_time),
+                'sessions_to_detect': first_detection_idx,
+                'detection_lag_pct': (ttd_hours / incident_duration_hours * 100) if incident_duration_hours > 0 else 0.0
+            })
             
             # TTD in sessions (0-indexed)
             ttd_sessions_list.append(first_detection_idx)
@@ -145,6 +160,9 @@ def compute_ttd(
             # TTD as lag percentage
             ttd_lag = ttd_hours / incident_duration_hours * 100
             ttd_lag_list.append(min(100, max(0, ttd_lag)))
+            
+        # Store for this user (overwrites if multiple incidents for same user - rare in this dataset)
+        per_incident_ttd[user] = incident_data
     
     n_detected = len(ttd_hours_list)
     n_total = len(insider_incidents)
@@ -154,6 +172,7 @@ def compute_ttd(
         'ttd_hours_median': np.median(ttd_hours_list) if ttd_hours_list else 0.0,
         'ttd_sessions_mean': np.mean(ttd_sessions_list) if ttd_sessions_list else 0.0,
         'ttd_lag_mean': np.mean(ttd_lag_list) if ttd_lag_list else 0.0,
+        'ttd_lag_median': np.median(ttd_lag_list) if ttd_lag_list else 0.0,
         'n_incidents_detected': n_detected,
         'n_incidents_total': n_total,
         'pct_first_session': (first_session_detections / n_detected * 100) if n_detected > 0 else 0.0,
