@@ -32,45 +32,128 @@ def load_json(path: Path) -> Any:
         return json.load(f)
 
 
-def load_ground_truth(answers_dir: Path) -> Dict[str, List[str]]:
+def load_ground_truth(
+    answers_dir: Path, 
+    dataset: str = "4.2",
+    parse_details: bool = True,
+) -> Dict[str, Any]:
     """
-    Load CERT R4.2 ground truth from answers directory.
+    Load CERT ground truth from answers directory.
     
+    For R4.2, this parses:
+    1. insiders.csv - Master file with user IDs and time ranges
+    2. r4.2-X/*.csv - Detail files with exact malicious event timestamps
+    
+    Args:
+        answers_dir: Path to answers directory
+        dataset: Dataset version to filter for (default "4.2")
+        parse_details: If True, parse detail files for session-level labels
+        
     Returns:
-        Dict with 'insider_users' and 'insider_sessions' lists
+        Dict with:
+        - 'insider_users': List of insider user IDs
+        - 'insider_incidents': List of dicts with user, start, end times
+        - 'malicious_events': List of dicts with user, timestamp, event_type
     """
+    import pandas as pd
+    from datetime import datetime
+    
     insider_users = set()
-    insider_sessions = set()
+    insider_incidents = []  # Time ranges for each incident
+    malicious_events = []   # Individual malicious events
     
-    # The answers directory contains files indicating malicious activity
-    for file in answers_dir.glob("*.csv"):
-        try:
-            import pandas as pd
-            df = pd.read_csv(file)
-            
-            if 'user' in df.columns:
-                insider_users.update(df['user'].dropna().unique())
-            if 'session_id' in df.columns:
-                insider_sessions.update(df['session_id'].dropna().unique())
-        except Exception as e:
-            logger.warning(f"Could not load {file}: {e}")
-    
-    # Also check for insiders.csv if it exists
+    # Load insiders.csv master file
     insiders_file = answers_dir / "insiders.csv"
-    if insiders_file.exists():
-        try:
-            import pandas as pd
-            df = pd.read_csv(insiders_file)
-            if 'user_id' in df.columns:
-                insider_users.update(df['user_id'].dropna().unique())
-            elif 'user' in df.columns:
-                insider_users.update(df['user'].dropna().unique())
-        except Exception as e:
-            logger.warning(f"Could not load {insiders_file}: {e}")
+    if not insiders_file.exists():
+        logger.warning(f"insiders.csv not found in {answers_dir}")
+        return {
+            'insider_users': [],
+            'insider_incidents': [],
+            'malicious_events': [],
+        }
+    
+    try:
+        df = pd.read_csv(insiders_file)
+        
+        # Filter for specified dataset
+        df_filtered = df[df['dataset'].astype(str) == str(dataset)]
+        logger.info(f"Found {len(df_filtered)} insider incidents for dataset {dataset}")
+        
+        for _, row in df_filtered.iterrows():
+            user = row['user']
+            insider_users.add(user)
+            
+            # Parse start/end times
+            try:
+                start = pd.to_datetime(row['start'])
+                end = pd.to_datetime(row['end'])
+                
+                insider_incidents.append({
+                    'user': user,
+                    'scenario': int(row['scenario']),
+                    'details_file': row['details'],
+                    'start': start,
+                    'end': end,
+                })
+            except Exception as e:
+                logger.warning(f"Could not parse dates for {user}: {e}")
+                insider_incidents.append({
+                    'user': user,
+                    'scenario': int(row['scenario']),
+                    'details_file': row['details'],
+                    'start': None,
+                    'end': None,
+                })
+        
+        logger.info(f"Loaded {len(insider_users)} unique insider users")
+        
+    except Exception as e:
+        logger.error(f"Could not load {insiders_file}: {e}")
+        return {
+            'insider_users': [],
+            'insider_incidents': [],
+            'malicious_events': [],
+        }
+    
+    # Parse detail files for exact event timestamps
+    if parse_details:
+        for scenario_num in [1, 2, 3]:
+            detail_dir = answers_dir / f"r{dataset}-{scenario_num}"
+            if not detail_dir.exists():
+                continue
+                
+            for detail_file in detail_dir.glob("*.csv"):
+                try:
+                    # Detail files have no header, variable columns
+                    # Format: type,id,timestamp,user,pc,action[,extra...]
+                    with open(detail_file, 'r') as f:
+                        for line in f:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 5:
+                                event_type = parts[0]
+                                timestamp_str = parts[2]
+                                user = parts[3]
+                                
+                                try:
+                                    timestamp = pd.to_datetime(timestamp_str)
+                                    malicious_events.append({
+                                        'user': user,
+                                        'timestamp': timestamp,
+                                        'event_type': event_type,
+                                        'file': detail_file.name,
+                                    })
+                                except:
+                                    pass  # Skip unparseable timestamps
+                                    
+                except Exception as e:
+                    logger.warning(f"Could not parse {detail_file}: {e}")
+        
+        logger.info(f"Parsed {len(malicious_events)} malicious events from detail files")
     
     return {
         'insider_users': list(insider_users),
-        'insider_sessions': list(insider_sessions),
+        'insider_incidents': insider_incidents,
+        'malicious_events': malicious_events,
     }
 
 

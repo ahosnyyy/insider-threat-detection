@@ -22,11 +22,14 @@ data/r4.2.tar.bz2
 models/*.pt
 models/*.pth
 models/*.onnx
+models/*.pkl
+models/*_history.json
 
 # Results and outputs
 results/
 data/outputs/
 *.jsonl
+*.npy
 
 # IDE
 .vscode/
@@ -40,9 +43,11 @@ data/outputs/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs & TensorBoard
 *.log
 logs/
+runs/
 
 #MD
 GIT_WORKFLOW.md
+docs/

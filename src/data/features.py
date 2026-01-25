@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import LabelEncoder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,33 +52,71 @@ NUMERIC_FEATURES = [
 
 # Optional features (added by enrichment)
 OPTIONAL_FEATURES = [
-    # LDAP features
+    # LDAP features (must match column names from sessionize.py)
     "is_admin",
-    "role_changed_this_month",
-    "dept_changed_this_month",
-    "user_terminated",
-    # Psychometric features
-    "openness",
-    "conscientiousness",
-    "extraversion",
-    "agreeableness",
-    "neuroticism",
+    "role_changed",       # Fixed: was role_changed_this_month
+    "dept_changed",       # Fixed: was dept_changed_this_month  
+    "terminated",         # Fixed: was user_terminated
+    # Psychometric features (Big 5)
+    "O",  # Openness
+    "C",  # Conscientiousness
+    "E",  # Extraversion
+    "A",  # Agreeableness
+    "N",  # Neuroticism
+]
+
+# Categorical features to encode
+CATEGORICAL_FEATURES = [
+    "role",  # 42 categories - will be one-hot encoded
 ]
 
 
 class FeatureExtractor:
-    """Extract and normalize features from session data."""
+    """
+    Extract and normalize features from session data.
     
-    def __init__(self, feature_names: List[str] = None, include_optional: bool = True):
+    Includes:
+    - Outlier clipping (1st-99th percentile)
+    - RobustScaler for normalization (handles outliers better)
+    - One-hot encoding for categorical features (role)
+    - Missing value imputation with median
+    """
+    
+    def __init__(
+        self, 
+        feature_names: List[str] = None, 
+        include_optional: bool = True,
+        include_role: bool = True,
+        clip_percentile: float = 99.0,
+    ):
         self.base_features = feature_names or NUMERIC_FEATURES.copy()
         self.include_optional = include_optional
-        self.feature_names = None  # Set during fit
-        self.scaler = StandardScaler()
+        self.include_role = include_role
+        self.clip_percentile = clip_percentile
+        
+        self.feature_names = None  # Set during fit (numeric only)
+        self.all_feature_names = None  # Including one-hot encoded
+        
+        # Use RobustScaler for better outlier handling
+        from sklearn.preprocessing import RobustScaler
+        self.scaler = RobustScaler()
+        
+        # For one-hot encoding role
+        self.role_encoder = None
+        self.role_categories = None
+        
+        # Percentile bounds for clipping
+        self.clip_lower = {}
+        self.clip_upper = {}
+        
+        # Medians for imputation
+        self.medians = {}
+        
         self.is_fitted = False
     
     def fit(self, df: pd.DataFrame) -> "FeatureExtractor":
-        """Fit scaler on training data."""
-        # Determine available features
+        """Fit scaler and encoders on training data."""
+        # Determine available numeric features
         self.feature_names = [f for f in self.base_features if f in df.columns]
         
         if self.include_optional:
@@ -86,11 +124,35 @@ class FeatureExtractor:
                 if f in df.columns:
                     self.feature_names.append(f)
         
+        # Compute percentile bounds and medians for each feature
+        for fname in self.feature_names:
+            if fname in df.columns:
+                col = df[fname].dropna()
+                if len(col) > 0:
+                    self.clip_lower[fname] = np.percentile(col, 100 - self.clip_percentile)
+                    self.clip_upper[fname] = np.percentile(col, self.clip_percentile)
+                    self.medians[fname] = col.median()
+        
+        # Fit one-hot encoder for role
+        if self.include_role and "role" in df.columns:
+            self.role_categories = sorted(df["role"].dropna().unique().tolist())
+            logger.info(f"Role categories ({len(self.role_categories)}): {self.role_categories[:5]}...")
+        
+        # Extract and preprocess features
         features = self._extract_raw_features(df)
         self.scaler.fit(features)
+        
+        # Build full feature name list
+        self.all_feature_names = self.feature_names.copy()
+        if self.role_categories:
+            for role in self.role_categories:
+                self.all_feature_names.append(f"role_{role}")
+        
         self.is_fitted = True
-        logger.info(f"Fitted scaler on {len(df):,} sessions, {len(self.feature_names)} features")
-        logger.info(f"Features: {self.feature_names}")
+        logger.info(f"Fitted on {len(df):,} sessions")
+        logger.info(f"  Numeric features: {len(self.feature_names)}")
+        logger.info(f"  Role categories: {len(self.role_categories) if self.role_categories else 0}")
+        logger.info(f"  Total features: {len(self.all_feature_names)}")
         return self
     
     def transform(self, df: pd.DataFrame) -> np.ndarray:
@@ -98,9 +160,16 @@ class FeatureExtractor:
         if not self.is_fitted:
             raise ValueError("FeatureExtractor must be fitted before transform")
         
-        features = self._extract_raw_features(df)
-        normalized = self.scaler.transform(features)
-        return normalized
+        # Extract numeric features
+        numeric_features = self._extract_raw_features(df)
+        normalized = self.scaler.transform(numeric_features)
+        
+        # One-hot encode role
+        if self.role_categories and "role" in df.columns:
+            role_onehot = self._encode_role(df["role"])
+            normalized = np.hstack([normalized, role_onehot])
+        
+        return normalized.astype(np.float32)
     
     def fit_transform(self, df: pd.DataFrame) -> np.ndarray:
         """Fit and transform in one step."""
@@ -108,31 +177,119 @@ class FeatureExtractor:
         return self.transform(df)
     
     def _extract_raw_features(self, df: pd.DataFrame) -> np.ndarray:
-        """Extract raw feature values from DataFrame."""
-        # Extract available features
-        available = [f for f in self.feature_names if f in df.columns]
+        """Extract, clip, and impute raw feature values."""
+        n_samples = len(df)
+        n_features = len(self.feature_names)
+        features = np.zeros((n_samples, n_features), dtype=np.float32)
         
-        if len(available) < len(self.feature_names):
-            missing = set(self.feature_names) - set(available)
-            logger.warning(f"Missing features (will be zero-filled): {missing}")
-        
-        # Start with zeros
-        features = np.zeros((len(df), len(self.feature_names)), dtype=np.float32)
-        
-        # Fill in available features
         for i, fname in enumerate(self.feature_names):
             if fname in df.columns:
-                features[:, i] = df[fname].fillna(0).values
+                col = df[fname].values.astype(np.float32)
+                
+                # Impute missing with median (or 0 if no median computed)
+                mask = np.isnan(col) | pd.isna(df[fname])
+                median = self.medians.get(fname, 0.0)
+                col = np.where(mask, median, col)
+                
+                # Clip outliers
+                if fname in self.clip_lower:
+                    col = np.clip(col, self.clip_lower[fname], self.clip_upper[fname])
+                
+                features[:, i] = col
         
         return features
     
+    def _encode_role(self, role_series: pd.Series) -> np.ndarray:
+        """One-hot encode role column."""
+        n_samples = len(role_series)
+        n_roles = len(self.role_categories)
+        encoded = np.zeros((n_samples, n_roles), dtype=np.float32)
+        
+        role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
+        
+        for i, role in enumerate(role_series):
+            if pd.notna(role) and role in role_to_idx:
+                encoded[i, role_to_idx[role]] = 1.0
+        
+        return encoded
+    
     def get_feature_dim(self) -> int:
-        """Get number of features."""
-        return len(self.feature_names) if self.feature_names else len(self.base_features)
+        """Get total number of features (numeric + one-hot)."""
+        if self.all_feature_names:
+            return len(self.all_feature_names)
+        return len(self.base_features)
     
     def get_feature_names(self) -> List[str]:
-        """Get list of feature names."""
-        return self.feature_names or self.base_features
+        """Get list of all feature names."""
+        return self.all_feature_names or self.base_features
+
+    def save(self, path: Union[str, Path]) -> None:
+        """
+        Save fitted extractor to disk.
+        
+        Args:
+            path: Path to save file (e.g. 'models/feature_extractor.pkl')
+        """
+        import pickle
+        
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        state = {
+            # Init args
+            'feature_names': self.feature_names,
+            'include_optional': self.include_optional,
+            'include_role': self.include_role,
+            'clip_percentile': self.clip_percentile,
+            # Fitted state
+            'scaler': self.scaler,
+            'role_categories': self.role_categories,
+            'role_to_idx': self.role_to_idx,
+            'all_feature_names': self.all_feature_names,
+            'base_features': self.base_features,
+        }
+        
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+            
+        logging.getLogger(__name__).info(f"FeatureExtractor saved to {path}")
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> 'FeatureExtractor':
+        """
+        Load fitted extractor from disk.
+        
+        Args:
+            path: Path to saved file
+            
+        Returns:
+            Fitted FeatureExtractor instance
+        """
+        import pickle
+        
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"FeatureExtractor file not found: {path}")
+            
+        with open(path, 'rb') as f:
+            state = pickle.load(f)
+            
+        # Create instance with init args
+        instance = cls(
+            feature_names=state.get('feature_names'),
+            include_optional=state.get('include_optional', True),
+            include_role=state.get('include_role', True),
+            clip_percentile=state.get('clip_percentile', 99.0),
+        )
+        
+        # Restore fitted state
+        instance.scaler = state['scaler']
+        instance.role_categories = state['role_categories']
+        instance.role_to_idx = state['role_to_idx']
+        instance.all_feature_names = state['all_feature_names']
+        instance.base_features = state['base_features']
+        
+        return instance
 
 
 class SequenceBuilder:
@@ -210,68 +367,357 @@ class SequenceBuilder:
 def prepare_training_data(
     df: pd.DataFrame,
     sequence_length: int = 100,
-    train_ratio: float = 0.8,
-    normal_only: bool = True,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.2,
+    normal_only_train: bool = True,
     insider_users: Optional[List[str]] = None,
+    insider_incidents: Optional[List[Dict]] = None,
     seed: int = 42,
 ) -> Dict[str, any]:
     """
-    Prepare data for autoencoder training.
+    Prepare data for autoencoder training with train/val/test split.
+    
+    Split strategy (per paper):
+    - Train (70%): Normal users only - learns normal behavior
+    - Val (10%): Normal users only - early stopping based on reconstruction loss
+    - Test (20%): ALL users including insiders - for precision/recall/F1 evaluation
+    
+    Session-level labels:
+    - Uses incident time ranges to label ONLY sessions during malicious activity
+    - Normal sessions from insider users are labeled as normal
     
     Args:
         df: Session features DataFrame
         sequence_length: Max sequence length
-        train_ratio: Train/val split ratio
-        normal_only: If True, train only on normal (non-insider) sessions
-        insider_users: List of known insider user IDs (from ground truth)
+        train_ratio: Training set ratio (default 0.7)
+        val_ratio: Validation set ratio (default 0.1)
+        test_ratio: Test set ratio (default 0.2)
+        normal_only_train: If True, train/val only on normal users
+        insider_users: List of known insider user IDs
+        insider_incidents: List of dicts with 'user', 'start', 'end' for session-level labels
         seed: Random seed for reproducibility
         
     Returns:
-        Dict with train/val sequences, masks, session IDs, and feature extractor
+        Dict with train/val/test sequences, masks, session IDs, labels, and extractor
     """
     np.random.seed(seed)
     
     logger.info(f"Preparing training data from {len(df):,} sessions")
+    logger.info(f"Split: {train_ratio:.0%} train / {val_ratio:.0%} val / {test_ratio:.0%} test")
     
-    # Filter to normal users if specified
-    if normal_only and insider_users and len(insider_users) > 0:
-        train_df = df[~df["user_id"].isin(insider_users)].copy()
-        logger.info(f"Filtered to {len(train_df):,} normal sessions (excluded {len(insider_users)} insider users)")
-    else:
-        train_df = df.copy()
+    # Sort by user and time
+    df = df.copy()
+    if "start_time" in df.columns:
+        df["start_time"] = pd.to_datetime(df["start_time"])
+        df = df.sort_values(["user_id", "start_time"]).reset_index(drop=True)
     
-    # Sort by user and time for proper sequence building
-    if "start_time" in train_df.columns:
-        train_df = train_df.sort_values(["user_id", "start_time"]).reset_index(drop=True)
+    # Identify insider sessions using time ranges (session-level labels)
+    insider_user_set = set(insider_users or [])
     
-    # Extract features
+    # Create BOTH labels: user-level and session-level
+    def create_labels(row):
+        user_id = row["user_id"]
+        
+        # User-level: 1 if user is in insider list (regardless of timing)
+        user_label = 1 if user_id in insider_user_set else 0
+        
+        # Session-level: 1 only if session falls within incident window
+        session_label = 0
+        if user_id in insider_user_set and insider_incidents:
+            session_time = row.get("start_time")
+            if session_time is not None and pd.notna(session_time):
+                session_time = pd.to_datetime(session_time)
+                
+                for incident in insider_incidents:
+                    if incident["user"] == user_id:
+                        start = incident.get("start")
+                        end = incident.get("end")
+                        
+                        if start is not None and end is not None:
+                            if start <= session_time <= end:
+                                session_label = 1
+                                break
+        elif user_id in insider_user_set:
+            # Fallback: if no incidents provided, use user-level
+            session_label = user_label
+        
+        return pd.Series({'label_user': user_label, 'label_session': session_label})
+    
+    labels_df = df.apply(create_labels, axis=1)
+    df["label_user"] = labels_df["label_user"]
+    df["label_session"] = labels_df["label_session"]
+    df["label"] = df["label_session"]  # Default to session-level
+    
+    n_user_insiders = df["label_user"].sum()
+    n_session_insiders = df["label_session"].sum()
+    logger.info(f"User-level labels: {n_user_insiders:,} insider sessions ({n_user_insiders/len(df)*100:.2f}%)")
+    logger.info(f"Session-level labels: {n_session_insiders:,} insider sessions ({n_session_insiders/len(df)*100:.3f}%)")
+    
+    # Separate data by USER (not session) - insider users go to test, normal users to train/val/test
+    # This ensures proper evaluation: test set has ALL sessions from insider users
+    normal_user_df = df[df["label_user"] == 0].copy()  # Sessions from normal users
+    insider_user_df = df[df["label_user"] == 1].copy()  # ALL sessions from insider users
+    
+    logger.info(f"Normal user sessions: {len(normal_user_df):,}, Insider user sessions: {len(insider_user_df):,}")
+    
+    # Fit feature extractor on normal user data only (no insider users in training)
     extractor = FeatureExtractor()
-    features = extractor.fit_transform(train_df)
+    extractor.fit(normal_user_df)
     
-    # Build sequences
+    # Transform normal user data
+    normal_features = extractor.transform(normal_user_df)
+    
+    # Build sequences for normal users
     builder = SequenceBuilder(sequence_length=sequence_length)
-    sequences, masks, session_ids = builder.build_user_sequences(train_df, features)
+    normal_sequences, normal_masks, normal_session_ids = builder.build_user_sequences(
+        normal_user_df.reset_index(drop=True), normal_features
+    )
+    normal_labels_session = np.zeros(len(normal_sequences), dtype=np.int32)
+    normal_labels_user = np.zeros(len(normal_sequences), dtype=np.int32)
     
-    logger.info(f"Built {len(sequences):,} sequences, shape: {sequences.shape}")
+    logger.info(f"Built {len(normal_sequences):,} normal user sequences")
     
-    # Split train/val
-    n_samples = len(sequences)
-    n_train = int(n_samples * train_ratio)
-    indices = np.random.permutation(n_samples)
+    # Split normal user data into train/val/test_normal
+    n_normal = len(normal_sequences)
+    n_train = int(n_normal * train_ratio)
+    n_val = int(n_normal * val_ratio)
     
+    indices = np.random.permutation(n_normal)
     train_idx = indices[:n_train]
-    val_idx = indices[n_train:]
+    val_idx = indices[n_train:n_train + n_val]
+    test_normal_idx = indices[n_train + n_val:]
+    
+    # Build sequences for ALL insider user sessions (for test set)
+    if len(insider_user_df) > 0:
+        insider_features = extractor.transform(insider_user_df)
+        insider_sequences, insider_masks, insider_session_ids = builder.build_user_sequences(
+            insider_user_df.reset_index(drop=True), insider_features
+        )
+        
+        # Map session_id to labels from the DataFrame
+        session_to_label_session = dict(zip(insider_user_df["session_id"], insider_user_df["label_session"]))
+        session_to_label_user = dict(zip(insider_user_df["session_id"], insider_user_df["label_user"]))
+        
+        insider_labels_session = np.array([session_to_label_session.get(sid, 0) for sid in insider_session_ids], dtype=np.int32)
+        insider_labels_user = np.array([session_to_label_user.get(sid, 1) for sid in insider_session_ids], dtype=np.int32)
+        
+        logger.info(f"Built {len(insider_sequences):,} insider user sequences")
+        logger.info(f"  Session-level insiders: {insider_labels_session.sum():,}")
+        logger.info(f"  User-level insiders: {insider_labels_user.sum():,}")
+    else:
+        insider_sequences = np.array([]).reshape(0, sequence_length, extractor.get_feature_dim())
+        insider_masks = np.array([]).reshape(0, sequence_length)
+        insider_session_ids = []
+        insider_labels_session = np.array([], dtype=np.int32)
+        insider_labels_user = np.array([], dtype=np.int32)
+    
+    # Combine test set: normal user test portion + ALL insider user sessions
+    test_sequences = np.concatenate([normal_sequences[test_normal_idx], insider_sequences])
+    test_masks = np.concatenate([normal_masks[test_normal_idx], insider_masks])
+    test_labels = np.concatenate([normal_labels_session[test_normal_idx], insider_labels_session])  # Session-level
+    test_labels_user = np.concatenate([normal_labels_user[test_normal_idx], insider_labels_user])    # User-level
+    test_session_ids = [normal_session_ids[i] for i in test_normal_idx] + insider_session_ids
+    
+    # Build test_timestamps and test_user_ids for TTD calculation
+    session_to_time = {}
+    session_to_user = {}
+    
+    # helper to populate lookups
+    def populate_lookups(df_source):
+        if "start_time" in df_source.columns and "session_id" in df_source.columns:
+            session_to_time.update(dict(zip(df_source["session_id"], df_source["start_time"])))
+        if "user_id" in df_source.columns and "session_id" in df_source.columns:
+            session_to_user.update(dict(zip(df_source["session_id"], df_source["user_id"])))
+            
+    populate_lookups(normal_user_df)
+    populate_lookups(insider_user_df)
+    
+    test_timestamps = [session_to_time.get(sid) for sid in test_session_ids]
+    test_user_ids = [session_to_user.get(sid) for sid in test_session_ids]
+    
+    logger.info(f"Train: {len(train_idx):,}, Val: {len(val_idx):,}, Test: {len(test_sequences):,}")
+    logger.info(f"Test set (session-level): {(test_labels == 0).sum():,} normal, {(test_labels == 1).sum():,} insider")
+    logger.info(f"Test set (user-level): {(test_labels_user == 0).sum():,} normal, {(test_labels_user == 1).sum():,} insider")
     
     return {
-        "train_sequences": sequences[train_idx],
-        "train_masks": masks[train_idx],
-        "train_session_ids": [session_ids[i] for i in train_idx],
-        "val_sequences": sequences[val_idx],
-        "val_masks": masks[val_idx],
-        "val_session_ids": [session_ids[i] for i in val_idx],
+        # Training data (normal only)
+        "train_sequences": normal_sequences[train_idx],
+        "train_masks": normal_masks[train_idx],
+        "train_session_ids": [normal_session_ids[i] for i in train_idx],
+        "train_labels": normal_labels_session[train_idx],
+        # Validation data (normal only, for early stopping)
+        "val_sequences": normal_sequences[val_idx],
+        "val_masks": normal_masks[val_idx],
+        "val_session_ids": [normal_session_ids[i] for i in val_idx],
+        "val_labels": normal_labels_session[val_idx],
+        # Test data (normal + insider, for evaluation metrics)
+        "test_sequences": test_sequences,
+        "test_masks": test_masks,
+        "test_session_ids": test_session_ids,
+        "test_timestamps": test_timestamps,     # For TTD calculation
+        "test_user_ids": test_user_ids,         # For TTD calculation
+        "test_labels": test_labels,             # Session-level (default)
+        "test_labels_user": test_labels_user,   # User-level (for comparison)
+        # Metadata
         "feature_extractor": extractor,
         "feature_dim": extractor.get_feature_dim(),
         "feature_names": extractor.get_feature_names(),
+        "split_type": "random",
+        "n_user_level_insiders": int(n_user_insiders),
+        "n_session_level_insiders": int(n_session_insiders),
+    }
+
+
+def prepare_training_data_temporal(
+    df: pd.DataFrame,
+    sequence_length: int = 100,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.2,
+    insider_users: Optional[List[str]] = None,
+    insider_incidents: Optional[List[Dict]] = None,
+) -> Dict[str, any]:
+    """
+    Prepare data with TEMPORAL split (no data leakage).
+    
+    Split is based on time, not random:
+    - Train: First 70% of timeline (normal users only)
+    - Val: Next 10% of timeline (normal users only)
+    - Test: Last 20% of timeline (ALL users including insiders)
+    
+    This prevents the model from "seeing the future" during training.
+    """
+    logger.info(f"Preparing training data with TEMPORAL split")
+    logger.info(f"Split: {train_ratio:.0%} train / {val_ratio:.0%} val / {test_ratio:.0%} test")
+    
+    # Ensure we have timestamps
+    if "start_time" not in df.columns:
+        raise ValueError("Temporal split requires 'start_time' column")
+    
+    df = df.copy()
+    df["start_time"] = pd.to_datetime(df["start_time"])
+    df = df.sort_values("start_time").reset_index(drop=True)
+    
+    # Find cutoff dates
+    min_date = df["start_time"].min()
+    max_date = df["start_time"].max()
+    total_days = (max_date - min_date).days
+    
+    train_cutoff = min_date + pd.Timedelta(days=int(total_days * train_ratio))
+    val_cutoff = min_date + pd.Timedelta(days=int(total_days * (train_ratio + val_ratio)))
+    
+    logger.info(f"Date range: {min_date.date()} to {max_date.date()} ({total_days} days)")
+    logger.info(f"Train cutoff: {train_cutoff.date()}, Val cutoff: {val_cutoff.date()}")
+    
+    # Label insider sessions - create BOTH user-level and session-level
+    insider_user_set = set(insider_users or [])
+    
+    def create_labels(row):
+        user_id = row["user_id"]
+        
+        # User-level: 1 if user is in insider list
+        user_label = 1 if user_id in insider_user_set else 0
+        
+        # Session-level: 1 only during incident window
+        session_label = 0
+        if user_id in insider_user_set and insider_incidents:
+            session_time = row["start_time"]
+            for incident in insider_incidents:
+                if incident["user"] == user_id:
+                    start = incident.get("start")
+                    end = incident.get("end")
+                    if start is not None and end is not None:
+                        if start <= session_time <= end:
+                            session_label = 1
+                            break
+        elif user_id in insider_user_set:
+            session_label = user_label  # Fallback
+        
+        return pd.Series({'label_user': user_label, 'label_session': session_label})
+    
+    labels_df = df.apply(create_labels, axis=1)
+    df["label_user"] = labels_df["label_user"]
+    df["label_session"] = labels_df["label_session"]
+    df["label"] = df["label_session"]  # Default to session-level
+    
+    n_user_insiders = df["label_user"].sum()
+    n_session_insiders = df["label_session"].sum()
+    
+    # Split by time
+    train_df = df[(df["start_time"] < train_cutoff) & (df["label"] == 0)]
+    val_df = df[(df["start_time"] >= train_cutoff) & (df["start_time"] < val_cutoff) & (df["label"] == 0)]
+    test_df = df[df["start_time"] >= val_cutoff]  # ALL users in test period
+    
+    logger.info(f"Train period: {len(train_df):,} sessions (normal only)")
+    logger.info(f"Val period: {len(val_df):,} sessions (normal only)")
+    logger.info(f"Test period: {len(test_df):,} sessions (all users)")
+    logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
+    
+    # Fit extractor on train data only
+    extractor = FeatureExtractor()
+    extractor.fit(train_df)
+    
+    # Build sequences
+    builder = SequenceBuilder(sequence_length=sequence_length)
+    
+    # Transform and build for each split
+    def build_split(split_df, name):
+        if len(split_df) == 0:
+            return (
+                np.array([]).reshape(0, sequence_length, extractor.get_feature_dim()),
+                np.array([]).reshape(0, sequence_length),
+                [],
+                np.array([], dtype=np.int32),
+            )
+        features = extractor.transform(split_df.reset_index(drop=True))
+        seqs, masks, sess_ids = builder.build_user_sequences(
+            split_df.reset_index(drop=True), features
+        )
+        
+        # Map session IDs to both label types and timestamps
+        session_to_label = dict(zip(split_df["session_id"], split_df["label_session"]))
+        session_to_label_user = dict(zip(split_df["session_id"], split_df["label_user"]))
+        session_to_time = dict(zip(split_df["session_id"], split_df["start_time"]))
+        
+        labels = np.array([session_to_label.get(sid, 0) for sid in sess_ids], dtype=np.int32)
+        labels_user = np.array([session_to_label_user.get(sid, 0) for sid in sess_ids], dtype=np.int32)
+        timestamps = [session_to_time.get(sid) for sid in sess_ids]
+        
+        logger.info(f"Built {len(seqs):,} {name} sequences")
+        return seqs, masks, sess_ids, labels, labels_user, timestamps
+    
+    train_seqs, train_masks, train_ids, train_labels, _, _ = build_split(train_df, "train")
+    val_seqs, val_masks, val_ids, val_labels, _, _ = build_split(val_df, "val")
+    test_seqs, test_masks, test_ids, test_labels, test_labels_user, test_timestamps = build_split(test_df, "test")
+    
+    logger.info(f"Test labels (session): {(test_labels == 0).sum():,} normal, {(test_labels == 1).sum():,} insider")
+    logger.info(f"Test labels (user): {(test_labels_user == 0).sum():,} normal, {(test_labels_user == 1).sum():,} insider")
+    
+    return {
+        "train_sequences": train_seqs,
+        "train_masks": train_masks,
+        "train_session_ids": train_ids,
+        "train_labels": train_labels,
+        "val_sequences": val_seqs,
+        "val_masks": val_masks,
+        "val_session_ids": val_ids,
+        "val_labels": val_labels,
+        "test_sequences": test_seqs,
+        "test_masks": test_masks,
+        "test_session_ids": test_ids,
+        "test_timestamps": test_timestamps,     # For TTD calculation
+        "test_user_ids": split_data["test"]["user_ids"], # For TTD calculation
+        "test_labels": test_labels,             # Session-level (default)
+        "test_labels_user": test_labels_user,   # User-level (for comparison)
+        "feature_extractor": extractor,
+        "feature_dim": extractor.get_feature_dim(),
+        "feature_names": extractor.get_feature_names(),
+        "split_type": "temporal",
+        "train_cutoff": str(train_cutoff.date()),
+        "val_cutoff": str(val_cutoff.date()),
+        "n_user_level_insiders": int(n_user_insiders),
+        "n_session_level_insiders": int(n_session_insiders),
     }
 
 
@@ -298,3 +744,4 @@ if __name__ == "__main__":
         print(f"  Features: {data['feature_names']}")
     else:
         print(f"Database not found: {db_path}")
+
