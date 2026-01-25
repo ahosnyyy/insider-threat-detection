@@ -47,7 +47,7 @@ def validate_data(db_path: Path):
                 
         if table == 'sessions':
             # Check for negative durations
-            neg_dur = con.execute("SELECT COUNT(*) FROM sessions WHERE duration < 0").fetchone()[0]
+            neg_dur = con.execute("SELECT COUNT(*) FROM sessions WHERE duration_minutes < 0").fetchone()[0]
             if neg_dur > 0:
                 logger.warning(f"FOUND {neg_dur} sessions with negative duration!")
                 
