@@ -104,6 +104,7 @@ class FeatureExtractor:
         # For one-hot encoding role
         self.role_encoder = None
         self.role_categories = None
+        self.role_to_idx = None  # Fixed: Initialize attribute
         
         # Percentile bounds for clipping
         self.clip_lower = {}
@@ -136,6 +137,7 @@ class FeatureExtractor:
         # Fit one-hot encoder for role
         if self.include_role and "role" in df.columns:
             self.role_categories = sorted(df["role"].dropna().unique().tolist())
+            self.role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
             logger.info(f"Role categories ({len(self.role_categories)}): {self.role_categories[:5]}...")
         
         # Extract and preprocess features
@@ -205,11 +207,15 @@ class FeatureExtractor:
         n_roles = len(self.role_categories)
         encoded = np.zeros((n_samples, n_roles), dtype=np.float32)
         
-        role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
+        # Use stored mapping if available, otherwise rebuild (fallback)
+        if self.role_to_idx:
+            mapping = self.role_to_idx
+        else:
+            mapping = {role: i for i, role in enumerate(self.role_categories)}
         
         for i, role in enumerate(role_series):
-            if pd.notna(role) and role in role_to_idx:
-                encoded[i, role_to_idx[role]] = 1.0
+            if pd.notna(role) and role in mapping:
+                encoded[i, mapping[role]] = 1.0
         
         return encoded
     
