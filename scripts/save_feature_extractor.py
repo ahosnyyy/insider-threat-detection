@@ -21,7 +21,7 @@ def main():
     db_path = Path("data/processed/cert.duckdb")
     if not db_path.exists():
         print(f"Error: Database not found: {db_path}")
-        return
+        return 1
     
     print(f"Loading data from {db_path}...")
     df = get_session_dataframe(db_path)
@@ -36,6 +36,8 @@ def main():
     extractor.save(output_path)
     
     print("Done! You can now run evaluation/inference.")
+    
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

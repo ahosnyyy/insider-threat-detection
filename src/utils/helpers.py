@@ -142,7 +142,7 @@ def load_ground_truth(
                                         'event_type': event_type,
                                         'file': detail_file.name,
                                     })
-                                except:
+                                except Exception:
                                     pass  # Skip unparseable timestamps
                                     
                 except Exception as e:

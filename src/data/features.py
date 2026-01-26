@@ -115,8 +115,15 @@ class FeatureExtractor:
         
         self.is_fitted = False
     
-    def fit(self, df: pd.DataFrame) -> "FeatureExtractor":
-        """Fit scaler and encoders on training data."""
+    def fit(self, df: pd.DataFrame, role_categories: List[str] = None) -> "FeatureExtractor":
+        """Fit scaler and encoders on training data.
+        
+        Args:
+            df: Training DataFrame
+            role_categories: Optional list of all role categories to use for one-hot encoding.
+                           If provided, ensures consistent dimensions even if some roles
+                           only appear in test data.
+        """
         # Determine available numeric features
         self.feature_names = [f for f in self.base_features if f in df.columns]
         
@@ -136,7 +143,11 @@ class FeatureExtractor:
         
         # Fit one-hot encoder for role
         if self.include_role and "role" in df.columns:
-            self.role_categories = sorted(df["role"].dropna().unique().tolist())
+            # Use provided role_categories if available, otherwise infer from data
+            if role_categories is not None:
+                self.role_categories = sorted(role_categories)
+            else:
+                self.role_categories = sorted(df["role"].dropna().unique().tolist())
             self.role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
             logger.info(f"Role categories ({len(self.role_categories)}): {self.role_categories[:5]}...")
         
@@ -253,6 +264,10 @@ class FeatureExtractor:
             'role_to_idx': self.role_to_idx,
             'all_feature_names': self.all_feature_names,
             'base_features': self.base_features,
+            # Clipping and imputation state
+            'clip_lower': self.clip_lower,
+            'clip_upper': self.clip_upper,
+            'medians': self.medians,
         }
         
         with open(path, 'wb') as f:
@@ -294,6 +309,12 @@ class FeatureExtractor:
         instance.role_to_idx = state['role_to_idx']
         instance.all_feature_names = state['all_feature_names']
         instance.base_features = state['base_features']
+        # Restore clipping and imputation state
+        instance.clip_lower = state.get('clip_lower', {})
+        instance.clip_upper = state.get('clip_upper', {})
+        instance.medians = state.get('medians', {})
+        # Mark as fitted
+        instance.is_fitted = True
         
         return instance
 

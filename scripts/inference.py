@@ -26,6 +26,7 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
+import pandas as pd
 import torch
 from tqdm import tqdm
 
@@ -70,7 +71,7 @@ class InferenceEngine:
     
     def _load_model(self, model_path: Path):
         """Load model from checkpoint."""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         
         # Infer feature dim from state dict
         state_dict = checkpoint['model_state_dict']
@@ -124,7 +125,7 @@ class InferenceEngine:
         # Combine current and history
         combined_df = user_history_df.copy()
         if session_df['session_id'] not in combined_df['session_id'].values:
-            combined_df = combined_df.append(session_df, ignore_index=True)
+            combined_df = pd.concat([combined_df, pd.DataFrame([session_df])], ignore_index=True)
         
         # Extract features
         features = self.feature_extractor.transform(combined_df)

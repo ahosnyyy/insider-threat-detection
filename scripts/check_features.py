@@ -11,7 +11,7 @@ def main():
     db_path = Path("data/processed/cert.duckdb")
     if not db_path.exists():
         print(f"Database not found at {db_path}")
-        return
+        return 1
 
     print("Loading all sessions to check feature dimensions...")
     con = duckdb.connect(str(db_path))
@@ -36,6 +36,8 @@ def main():
     print("-" * 50)
     print(f"Total feature dimension: {extractor.get_feature_dim()}")
     print("-" * 50)
+    
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -90,8 +90,6 @@ def main():
     insider_incidents = []
     if args.answers_dir.exists():
         logger.info(f"Loading ground truth from {args.answers_dir}")
-        # Need to import locally or ensure it's imported at top
-        from src.utils import load_ground_truth
         ground_truth = load_ground_truth(args.answers_dir, dataset="4.2")
         insider_users = ground_truth.get('insider_users', [])
         insider_incidents = ground_truth.get('insider_incidents', [])
@@ -132,7 +130,7 @@ def main():
     else:
         model = create_transformer_autoencoder({"feature_dim": feature_dim})
         
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
@@ -222,6 +220,8 @@ def main():
             f.write(f"{name:<30}: {score:.6f}\n")
             
     logger.info(f"Saved importance text report to {report_path}")
+    
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

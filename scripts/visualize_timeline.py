@@ -1,5 +1,6 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 from datetime import timedelta
 
@@ -16,19 +17,20 @@ def visualize_timeline(session_id: str, db_path: Path, output_dir: Path):
     """Visualize session timeline events."""
     if not db_path.exists():
         logger.error(f"Database not found: {db_path}")
-        return
+        return 1
 
     con = duckdb.connect(str(db_path))
     
     # Get session details
     session = con.execute(
-        f"SELECT user_id, start_time, end_time FROM sessions WHERE session_id = '{session_id}'"
+        "SELECT user_id, start_time, end_time FROM sessions WHERE session_id = ?",
+        [session_id]
     ).fetchone()
     
     if not session:
         logger.error(f"Session {session_id} not found.")
         con.close()
-        return
+        return 1
         
     user_id, start_time, end_time = session
     logger.info(f"Visualizing session {session_id} for user {user_id}")
@@ -47,51 +49,44 @@ def visualize_timeline(session_id: str, db_path: Path, output_dir: Path):
         # Check if table exists
         try:
             # R4.2 raw tables use 'user' and 'date'
-            query = f"""
-                SELECT date, '{table}' as type, id
-                FROM {table}
-                WHERE "user" = '{user_id}' 
-                AND date BETWEEN '{query_start}' AND '{query_end}'
-            """
-            
-            # Special columns for context
+            # Special columns for context based on table type
             if table == 'http':
                 query = f"""
                     SELECT date, '{table}' as type, url as info
                     FROM {table}
-                    WHERE "user" = '{user_id}' 
-                    AND date BETWEEN '{query_start}' AND '{query_end}'
+                    WHERE "user" = ? 
+                    AND date BETWEEN ? AND ?
                 """
             elif table == 'file':
                 query = f"""
                     SELECT date, '{table}' as type, filename as info
                     FROM {table}
-                    WHERE "user" = '{user_id}' 
-                    AND date BETWEEN '{query_start}' AND '{query_end}'
+                    WHERE "user" = ? 
+                    AND date BETWEEN ? AND ?
                 """
             elif table == 'email':
                 query = f"""
                     SELECT date, '{table}' as type, "to" as info
                     FROM {table}
-                    WHERE "user" = '{user_id}' 
-                    AND date BETWEEN '{query_start}' AND '{query_end}'
+                    WHERE "user" = ? 
+                    AND date BETWEEN ? AND ?
                 """
             elif table == 'logon':
-                 query = f"""
+                query = f"""
                     SELECT date, '{table}' as type, activity as info
                     FROM {table}
-                    WHERE "user" = '{user_id}' 
-                    AND date BETWEEN '{query_start}' AND '{query_end}'
+                    WHERE "user" = ? 
+                    AND date BETWEEN ? AND ?
                 """
             else:
-                 query = f"""
+                query = f"""
                     SELECT date, '{table}' as type, activity as info
                     FROM {table}
-                    WHERE "user" = '{user_id}' 
-                    AND date BETWEEN '{query_start}' AND '{query_end}'
+                    WHERE "user" = ? 
+                    AND date BETWEEN ? AND ?
                 """
                 
-            df_table = con.execute(query).fetchdf()
+            df_table = con.execute(query, [user_id, query_start, query_end]).fetchdf()
             if not df_table.empty:
                 events.append(df_table)
                 
@@ -102,7 +97,7 @@ def visualize_timeline(session_id: str, db_path: Path, output_dir: Path):
     
     if not events:
         logger.warning("No events found for this session timeline (empty session?)")
-        return
+        return 1
         
     df_events = pd.concat(events)
     df_events['date'] = pd.to_datetime(df_events['date'])
@@ -142,6 +137,8 @@ def visualize_timeline(session_id: str, db_path: Path, output_dir: Path):
     save_path = output_dir / f"timeline_{session_id}.png"
     plt.savefig(save_path)
     logger.info(f"Timeline saved to {save_path}")
+    
+    return 0
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize session timeline")
@@ -151,7 +148,8 @@ def main():
     args = parser.parse_args()
     
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    visualize_timeline(args.session_id, args.db_path, args.output_dir)
+    result = visualize_timeline(args.session_id, args.db_path, args.output_dir)
+    return result if result is not None else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -176,10 +176,11 @@ def load_parquet_to_duckdb(
     
     con = duckdb.connect(str(db_path))
     
-    # Create table from Parquet
+    # Create table from Parquet (use forward slashes for cross-platform compatibility)
+    parquet_path_str = str(parquet_path).replace('\\', '/')
     con.execute(f"""
         CREATE OR REPLACE TABLE {table_name} AS
-        SELECT * FROM read_parquet('{parquet_path}')
+        SELECT * FROM read_parquet('{parquet_path_str}')
     """)
     
     # Get row count
@@ -277,7 +278,7 @@ def get_table_stats(db_path: Path) -> Dict[str, int]:
         try:
             result = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
             stats[table] = result[0]
-        except:
+        except Exception:
             stats[table] = 0
     
     con.close()

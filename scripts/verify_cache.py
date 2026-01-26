@@ -32,6 +32,8 @@ def main():
         print("\n✅ SUCCESS: Caching is working! (Run 2 was fast)")
     else:
         print("\n❌ IDLE/FAILURE: Caching might not be working.")
+    
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

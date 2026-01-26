@@ -56,7 +56,7 @@ def compute_ttd(
         # Handle potential None timestamps
         ts = test_timestamps[i]
         if ts is not None:
-             # Ensure pandas timestamp for comparison
+            # Ensure pandas timestamp for comparison
             if not isinstance(ts, pd.Timestamp):
                 ts = pd.to_datetime(ts)
                 

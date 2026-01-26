@@ -206,8 +206,10 @@ def main():
         if item.is_file():
             rel_path = item.relative_to(output_dir)
             print(f"  - {rel_path}")
+    
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 

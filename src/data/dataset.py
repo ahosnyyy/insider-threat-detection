@@ -4,7 +4,7 @@ Moves data preparation logic out of features.py for better separation of concern
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
@@ -50,7 +50,7 @@ def prepare_training_data(
     insider_incidents: Optional[List[Dict]] = None,
     seed: int = 42,
     use_cache: bool = True,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Prepare data for autoencoder training with train/val/test split.
     
@@ -299,7 +299,7 @@ def prepare_training_data_temporal(
     insider_users: Optional[List[str]] = None,
     insider_incidents: Optional[List[Dict]] = None,
     use_cache: bool = True,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Prepare data with TEMPORAL split (no data leakage).
     

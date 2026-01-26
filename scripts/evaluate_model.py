@@ -37,7 +37,7 @@ def load_model(model_path: Path, model_type: str, feature_dim: int):
     else:
         model = TransformerAutoencoder(input_dim=feature_dim)
     
-    checkpoint = torch.load(model_path, map_location="cpu")
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     

@@ -1,6 +1,6 @@
 import argparse
 import logging
-import pickle
+import sys
 from pathlib import Path
 
 import duckdb
@@ -22,7 +22,7 @@ def load_model(model_path: Path, model_type: str, feature_dim: int):
     else:
         model = TransformerAutoencoder(input_dim=feature_dim)
         
-    checkpoint = torch.load(model_path, map_location="cpu")
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     return model
@@ -40,28 +40,33 @@ def visualize_sequence(
     
     if not extractor_path.exists() or not model_path.exists():
         logger.error("Model or FeatureExtractor not found. Run training first.")
-        return
+        return 1
 
     # 1. Load Extractor
-    with open(extractor_path, "rb") as f:
-        extractor = pickle.load(f)
+    extractor = FeatureExtractor.load(extractor_path)
         
     # 2. Get Data for User
     con = duckdb.connect(str(db_path))
     
     # identifying user first
-    res = con.execute(f"SELECT user_id, start_time FROM session_features WHERE session_id = '{session_id}'").fetchone()
+    res = con.execute(
+        "SELECT user_id, start_time FROM session_features WHERE session_id = ?",
+        [session_id]
+    ).fetchone()
     if not res:
         logger.error(f"Session {session_id} not found in database.")
         con.close()
-        return
+        return 1
         
     user_id, session_time = res
     logger.info(f"Found session {session_id} for user {user_id} at {session_time}")
     
     # Get user history (all sessions up to this one, or just all sessions to simplify grouping)
     # We load all sessions for the user to ensure SequenceBuilder works as expected (context)
-    df = con.execute(f"SELECT * FROM session_features WHERE user_id = '{user_id}' ORDER BY start_time").fetchdf()
+    df = con.execute(
+        "SELECT * FROM session_features WHERE user_id = ? ORDER BY start_time",
+        [user_id]
+    ).fetchdf()
     con.close()
     
     # 3. Process Data
@@ -75,7 +80,7 @@ def visualize_sequence(
         idx = session_ids.index(session_id)
     except ValueError:
         logger.error("Session lost during sequence building (maybe truncated?)")
-        return
+        return 1
         
     target_seq = sequences[idx] # (seq_len, feature_dim)
     target_mask = masks[idx]
@@ -139,6 +144,8 @@ def visualize_sequence(
     save_path = output_dir / f"sequence_{session_id}_{model_type}.png"
     plt.savefig(save_path)
     logger.info(f"Saved visualization to {save_path}")
+    
+    return 0
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize sequence reconstruction")
@@ -149,7 +156,8 @@ def main():
     args = parser.parse_args()
     
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    visualize_sequence(args.session_id, args.model, args.db_path, args.output_dir)
+    result = visualize_sequence(args.session_id, args.model, args.db_path, args.output_dir)
+    return result if result is not None else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -267,22 +267,23 @@ def enrich_with_ldap(db_path: Path) -> None:
     # Check if LDAP table exists
     try:
         con.execute("SELECT COUNT(*) FROM ldap").fetchone()
-    except:
+    except Exception:
         logger.warning("LDAP table not found, skipping enrichment")
         con.close()
         return
     
     # Check if we have ldap_history table (for temporal matching)
     has_history = False
+    ldap_history_path = str(db_path.parent / "ldap_history.parquet").replace('\\', '/')
     try:
-        con.execute("SELECT COUNT(*) FROM read_parquet('data/processed/ldap_history.parquet')").fetchone()
+        con.execute(f"SELECT COUNT(*) FROM read_parquet('{ldap_history_path}')").fetchone()
         has_history = True
-    except:
+    except Exception:
         pass
     
     if has_history:
         # Temporal matching: join session to LDAP snapshot from same month
-        con.execute("""
+        con.execute(f"""
             CREATE OR REPLACE TABLE session_features_enriched AS
             WITH session_months AS (
                 SELECT 
@@ -291,7 +292,7 @@ def enrich_with_ldap(db_path: Path) -> None:
                 FROM session_features sf
             ),
             ldap_hist AS (
-                SELECT * FROM read_parquet('data/processed/ldap_history.parquet')
+                SELECT * FROM read_parquet('{ldap_history_path}')
             )
             SELECT 
                 sm.* EXCLUDE (session_month),
@@ -353,7 +354,7 @@ def enrich_with_psychometric(db_path: Path) -> None:
     # Check if psychometric table exists
     try:
         con.execute("SELECT COUNT(*) FROM psychometric").fetchone()
-    except:
+    except Exception:
         logger.warning("Psychometric table not found, skipping enrichment")
         con.close()
         return

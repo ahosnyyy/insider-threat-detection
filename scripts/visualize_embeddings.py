@@ -1,5 +1,6 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,13 +14,14 @@ logger = logging.getLogger(__name__)
 
 def visualize_embeddings(model_type: str, method: str = 'tsne', output_dir: Path = Path("results")):
     """Visualize 2D embeddings."""
-    models_dir = Path("models")
-    emb_path = models_dir / f"embeddings_{model_type}.npy"
-    label_path = models_dir / f"labels_{model_type}.npy"
+    # evaluate_model.py saves embeddings to results/ directory
+    results_dir = Path("results")
+    emb_path = results_dir / f"embeddings_{model_type}.npy"
+    label_path = results_dir / f"labels_{model_type}.npy"
     
     if not emb_path.exists() or not label_path.exists():
         logger.error(f"Embeddings or labels not found for {model_type}. Run evaluate_model.py first.")
-        return
+        return 1
 
     logger.info(f"Loading embeddings from {emb_path}")
     embeddings = np.load(emb_path)
@@ -61,6 +63,8 @@ def visualize_embeddings(model_type: str, method: str = 'tsne', output_dir: Path
     save_path = output_dir / f"embeddings_{model_type}_{method}.png"
     plt.savefig(save_path)
     logger.info(f"Plot saved to {save_path}")
+    
+    return 0
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize model embeddings")
@@ -70,7 +74,8 @@ def main():
     args = parser.parse_args()
     
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    visualize_embeddings(args.model, args.method, args.output_dir)
+    result = visualize_embeddings(args.model, args.method, args.output_dir)
+    return result if result is not None else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,14 +16,14 @@ def compare_models(report_path: Path, output_dir: Path):
     """Visualize model comparison."""
     if not report_path.exists():
         logger.error(f"Report not found: {report_path}")
-        return
+        return 1
 
     with open(report_path, 'r') as f:
         results = json.load(f)
         
     if not results:
         logger.error("Empty report")
-        return
+        return 1
         
     logger.info(f"Comparing models: {list(results.keys())}")
     
@@ -90,6 +91,8 @@ def compare_models(report_path: Path, output_dir: Path):
         plt.tight_layout()
         plt.savefig(output_dir / "model_comparison_ttd.png")
         logger.info(f"TTD Comparison saved to {output_dir / 'model_comparison_ttd.png'}")
+    
+    return 0
 
 def main():
     parser = argparse.ArgumentParser(description="Compare models from evaluation report")
@@ -98,7 +101,8 @@ def main():
     args = parser.parse_args()
     
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    compare_models(args.input, args.output_dir)
+    result = compare_models(args.input, args.output_dir)
+    return result if result is not None else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

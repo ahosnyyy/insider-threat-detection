@@ -569,9 +569,6 @@ class Trainer:
             - ttd_sessions_mean: Mean number of sessions before first detection
             - ttd_lag_mean: Mean detection lag as % of incident duration
         """
-        """
-        Compute Time-to-Detect (TTD) metrics using shared utility.
-        """
         return compute_ttd(
             predictions=predictions,
             test_labels=test_labels,
@@ -621,7 +618,7 @@ class Trainer:
         """Load best checkpoint."""
         best_path = self.config.checkpoint_dir / f"{self.model_name}_best.pt"
         if best_path.exists():
-            checkpoint = torch.load(best_path, map_location=self.config.device)
+            checkpoint = torch.load(best_path, map_location=self.config.device, weights_only=False)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             logger.info(f"Loaded best model from epoch {checkpoint['epoch']+1}")
 
