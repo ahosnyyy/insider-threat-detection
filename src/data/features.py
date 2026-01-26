@@ -54,15 +54,15 @@ NUMERIC_FEATURES = [
 OPTIONAL_FEATURES = [
     # LDAP features (must match column names from sessionize.py)
     "is_admin",
-    "role_changed",       # Fixed: was role_changed_this_month
-    "dept_changed",       # Fixed: was dept_changed_this_month  
-    "terminated",         # Fixed: was user_terminated
+    "role_changed_this_month",       # Fixed: was role_changed
+    "dept_changed_this_month",       # Fixed: was dept_changed  
+    "user_terminated",               # Fixed: was terminated
     # Psychometric features (Big 5)
-    "O",  # Openness
-    "C",  # Conscientiousness
-    "E",  # Extraversion
-    "A",  # Agreeableness
-    "N",  # Neuroticism
+    "openness",           # Fixed: was O
+    "conscientiousness",  # Fixed: was C
+    "extraversion",       # Fixed: was E
+    "agreeableness",      # Fixed: was A
+    "neuroticism",        # Fixed: was N
 ]
 
 # Categorical features to encode
@@ -128,7 +128,7 @@ class FeatureExtractor:
         # Compute percentile bounds and medians for each feature
         for fname in self.feature_names:
             if fname in df.columns:
-                col = df[fname].dropna()
+                col = df[fname].dropna().astype(np.float32)
                 if len(col) > 0:
                     self.clip_lower[fname] = np.percentile(col, 100 - self.clip_percentile)
                     self.clip_upper[fname] = np.percentile(col, self.clip_percentile)

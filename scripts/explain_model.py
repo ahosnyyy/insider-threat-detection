@@ -72,6 +72,7 @@ def main():
     parser.add_argument("--num-background", type=int, default=100, help="Number of background samples (normal)")
     parser.add_argument("--num-test", type=int, default=50, help="Number of anomalous samples to explain")
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on (cpu/cuda)")
+    parser.add_argument("--answers-dir", type=Path, default=Path("data/raw/answers"), help="Directory with ground truth labels")
     args = parser.parse_args()
     
     setup_logging()
@@ -84,6 +85,18 @@ def main():
         
     df = get_session_dataframe(args.db_path)
     
+    # Load ground truth if available
+    insider_users = []
+    insider_incidents = []
+    if args.answers_dir.exists():
+        logger.info(f"Loading ground truth from {args.answers_dir}")
+        # Need to import locally or ensure it's imported at top
+        from src.utils import load_ground_truth
+        ground_truth = load_ground_truth(args.answers_dir, dataset="4.2")
+        insider_users = ground_truth.get('insider_users', [])
+        insider_incidents = ground_truth.get('insider_incidents', [])
+        logger.info(f"Found {len(insider_users)} insider users")
+    
     # 2. Prepare Data
     # We need a set of normal sessions (reference) and anomalous sessions (to explain)
     # We'll rely on our standard prep function for simplicity, even though it splits by time
@@ -93,6 +106,8 @@ def main():
         train_ratio=0.7, 
         val_ratio=0.1, 
         test_ratio=0.2,
+        insider_users=insider_users,
+        insider_incidents=insider_incidents,
     )
     
     feature_extractor = data['feature_extractor']
@@ -175,7 +190,7 @@ def main():
     
     # 2. Mean over batch (Global importance for these anomalies)
     # Shape: [features]
-    global_importance = np.mean(shap_sum_time, axis=0)
+    global_importance = np.mean(shap_sum_time, axis=0).flatten()
     
     # 6. Visualization
     # Sort features by importance
