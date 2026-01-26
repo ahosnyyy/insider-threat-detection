@@ -190,7 +190,7 @@ def main():
     
     # 2. Mean over batch (Global importance for these anomalies)
     # Shape: [features]
-    global_importance = np.mean(shap_sum_time, axis=0)
+    global_importance = np.mean(shap_sum_time, axis=0).flatten()
     
     # 6. Visualization
     # Sort features by importance
