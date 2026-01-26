@@ -109,9 +109,14 @@ def prepare_training_data(
     
     logger.info(f"Normal user sessions: {len(normal_user_df):,}, Insider user sessions: {len(insider_user_df):,}")
     
+    # Get all unique roles from the ENTIRE dataset to ensure consistent dimensions
+    # even if some roles only appear in the insider/test set.
+    all_roles = sorted(df["role"].dropna().unique().tolist())
+    
     # Fit feature extractor on normal user data only (no insider users in training)
+    # But pass all known roles so the one-hot encoding includes them
     extractor = FeatureExtractor()
-    extractor.fit(normal_user_df)
+    extractor.fit(normal_user_df, role_categories=all_roles)
     
     # Transform normal user data
     normal_features = extractor.transform(normal_user_df)
@@ -302,9 +307,14 @@ def prepare_training_data_temporal(
     logger.info(f"Test period: {len(test_df):,} sessions (all users)")
     logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
     
-    # Fit extractor on train data only
+    logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
+    
+    # Get all unique roles from the ENTIRE dataset
+    all_roles = sorted(df["role"].dropna().unique().tolist())
+    
+    # Fit extractor on train data only, but with ALL roles
     extractor = FeatureExtractor()
-    extractor.fit(train_df)
+    extractor.fit(train_df, role_categories=all_roles)
     
     # Build sequences
     builder = SequenceBuilder(sequence_length=sequence_length)

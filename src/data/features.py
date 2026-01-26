@@ -54,15 +54,15 @@ NUMERIC_FEATURES = [
 OPTIONAL_FEATURES = [
     # LDAP features (must match column names from sessionize.py)
     "is_admin",
-    "role_changed",       # Fixed: was role_changed_this_month
-    "dept_changed",       # Fixed: was dept_changed_this_month  
-    "terminated",         # Fixed: was user_terminated
+    "role_changed_this_month",       # Fixed: was role_changed
+    "dept_changed_this_month",       # Fixed: was dept_changed  
+    "user_terminated",               # Fixed: was terminated
     # Psychometric features (Big 5)
-    "O",  # Openness
-    "C",  # Conscientiousness
-    "E",  # Extraversion
-    "A",  # Agreeableness
-    "N",  # Neuroticism
+    "openness",           # Fixed: was O
+    "conscientiousness",  # Fixed: was C
+    "extraversion",       # Fixed: was E
+    "agreeableness",      # Fixed: was A
+    "neuroticism",        # Fixed: was N
 ]
 
 # Categorical features to encode
@@ -115,7 +115,7 @@ class FeatureExtractor:
         
         self.is_fitted = False
     
-    def fit(self, df: pd.DataFrame) -> "FeatureExtractor":
+    def fit(self, df: pd.DataFrame, role_categories: List[str] = None) -> "FeatureExtractor":
         """Fit scaler and encoders on training data."""
         # Determine available numeric features
         self.feature_names = [f for f in self.base_features if f in df.columns]
@@ -128,17 +128,25 @@ class FeatureExtractor:
         # Compute percentile bounds and medians for each feature
         for fname in self.feature_names:
             if fname in df.columns:
-                col = df[fname].dropna()
+                col = df[fname].dropna().astype(np.float32)
                 if len(col) > 0:
                     self.clip_lower[fname] = np.percentile(col, 100 - self.clip_percentile)
                     self.clip_upper[fname] = np.percentile(col, self.clip_percentile)
                     self.medians[fname] = col.median()
         
         # Fit one-hot encoder for role
-        if self.include_role and "role" in df.columns:
-            self.role_categories = sorted(df["role"].dropna().unique().tolist())
-            self.role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
-            logger.info(f"Role categories ({len(self.role_categories)}): {self.role_categories[:5]}...")
+        if self.include_role:
+             # Use provided categories if available (ensures consistency across splits)
+            if role_categories:
+                self.role_categories = sorted(role_categories)
+            elif "role" in df.columns:
+                self.role_categories = sorted(df["role"].dropna().unique().tolist())
+            else:
+                self.role_categories = []
+
+            if self.role_categories:
+                self.role_to_idx = {role: i for i, role in enumerate(self.role_categories)}
+                logger.info(f"Role categories ({len(self.role_categories)}): {self.role_categories[:5]}...")
         
         # Extract and preprocess features
         features = self._extract_raw_features(df)
@@ -350,7 +358,7 @@ class SequenceBuilder:
                 # Pad if needed (pad at beginning with zeros)
                 seq_len = len(seq_features)
                 if seq_len < self.sequence_length:
-                    padding = np.zeros((self.sequence_length - seq_len, feature_dim))
+                    padding = np.zeros((self.sequence_length - seq_len, feature_dim), dtype=np.float32)
                     seq_features = np.vstack([padding, seq_features])
                     mask = np.concatenate([
                         np.zeros(self.sequence_length - seq_len),

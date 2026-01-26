@@ -13,9 +13,25 @@ logger = logging.getLogger(__name__)
 
 def visualize_embeddings(model_type: str, method: str = 'tsne', output_dir: Path = Path("results")):
     """Visualize 2D embeddings."""
-    models_dir = Path("models")
-    emb_path = models_dir / f"embeddings_{model_type}.npy"
-    label_path = models_dir / f"labels_{model_type}.npy"
+    # Embeddings are saved in the results directory (output_dir parent usually, but let's check standard locations)
+    # evaluate_model saves to args.output.parent. If args.output is results/evaluation.json, then results/
+    search_dirs = [output_dir, Path("results"), Path("models")]
+    
+    emb_path = None
+    label_path = None
+    
+    for d in search_dirs:
+        e = d / f"embeddings_{model_type}.npy"
+        l = d / f"labels_{model_type}.npy"
+        if e.exists() and l.exists():
+            emb_path = e
+            label_path = l
+            break
+            
+    if emb_path is None:
+        # Fallback to hardcoded default if not found
+        emb_path = Path("results") / f"embeddings_{model_type}.npy"
+        label_path = Path("results") / f"labels_{model_type}.npy"
     
     if not emb_path.exists() or not label_path.exists():
         logger.error(f"Embeddings or labels not found for {model_type}. Run evaluate_model.py first.")
