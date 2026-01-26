@@ -350,7 +350,7 @@ class SequenceBuilder:
                 # Pad if needed (pad at beginning with zeros)
                 seq_len = len(seq_features)
                 if seq_len < self.sequence_length:
-                    padding = np.zeros((self.sequence_length - seq_len, feature_dim))
+                    padding = np.zeros((self.sequence_length - seq_len, feature_dim), dtype=np.float32)
                     seq_features = np.vstack([padding, seq_features])
                     mask = np.concatenate([
                         np.zeros(self.sequence_length - seq_len),
