@@ -307,8 +307,7 @@ def prepare_training_data_temporal(
     logger.info(f"Test period: {len(test_df):,} sessions (all users)")
     logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
     
-    logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
-    
+
     # Get all unique roles from the ENTIRE dataset
     all_roles = sorted(df["role"].dropna().unique().tolist())
     
