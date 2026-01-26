@@ -17,7 +17,7 @@ class LSTMEncoder(nn.Module):
         hidden_dim: int = 256,
         embedding_dim: int = 128,
         num_layers: int = 2,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
         bidirectional: bool = True,
     ):
         super().__init__()
@@ -74,7 +74,7 @@ class LSTMDecoder(nn.Module):
         hidden_dim: int = 256,
         embedding_dim: int = 128,
         num_layers: int = 2,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
     ):
         super().__init__()
         
@@ -152,7 +152,7 @@ class LSTMAutoencoder(nn.Module):
         hidden_dim: int = 256,
         embedding_dim: int = 128,
         num_layers: int = 2,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
     ):
         super().__init__()
         
@@ -240,7 +240,7 @@ def create_lstm_autoencoder(config: dict) -> LSTMAutoencoder:
         hidden_dim=config.get("hidden_dim", 256),
         embedding_dim=config.get("embedding_dim", 128),
         num_layers=config.get("num_layers", 2),
-        dropout=config.get("dropout", 0.3),
+        dropout=config.get("dropout", 0.2),
     )
 
 

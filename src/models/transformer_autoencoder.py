@@ -22,7 +22,11 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         
         pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        # Handle odd d_model: cos terms may have one fewer element
+        if d_model % 2 == 0:
+            pe[:, 1::2] = torch.cos(position * div_term)
+        else:
+            pe[:, 1::2] = torch.cos(position * div_term[:, :d_model // 2])
         pe = pe.unsqueeze(0)  # (1, max_len, d_model)
         
         self.register_buffer('pe', pe)
@@ -44,10 +48,10 @@ class TransformerEncoder(nn.Module):
         input_dim: int,
         d_model: int = 256,
         nhead: int = 8,
-        num_layers: int = 6,
-        dim_feedforward: int = 1024,
+        num_layers: int = 2,
+        dim_feedforward: int = 512,
         embedding_dim: int = 128,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
         max_len: int = 500,
     ):
         super().__init__()
@@ -123,20 +127,24 @@ class TransformerDecoder(nn.Module):
         output_dim: int,
         d_model: int = 256,
         nhead: int = 8,
-        num_layers: int = 6,
-        dim_feedforward: int = 1024,
+        num_layers: int = 2,
+        dim_feedforward: int = 512,
         embedding_dim: int = 128,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
         max_len: int = 500,
     ):
         super().__init__()
         
         self.d_model = d_model
+        self.output_dim = output_dim
         
         # Project embedding to sequence
         self.embedding_proj = nn.Linear(embedding_dim, d_model)
         
-        # Learnable query embeddings
+        # Project input (for teacher forcing)
+        self.input_proj = nn.Linear(output_dim, d_model)
+        
+        # Positional encoding
         self.pos_encoding = PositionalEncoding(d_model, max_len, dropout)
         
         # Transformer decoder layers (with cross-attention to encoder output)
@@ -158,6 +166,7 @@ class TransformerDecoder(nn.Module):
         encoder_output: torch.Tensor,
         seq_len: int,
         memory_mask: Optional[torch.Tensor] = None,
+        target: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -165,21 +174,28 @@ class TransformerDecoder(nn.Module):
             encoder_output: (batch, seq_len, d_model)
             seq_len: Target sequence length
             memory_mask: (batch, seq_len) - mask for encoder output
+            target: (batch, seq_len, output_dim) - ground truth for teacher forcing
             
         Returns:
             output: (batch, seq_len, output_dim)
         """
         batch_size = embedding.size(0)
         
-        # Create query sequence from embedding (broadcast + positional)
-        query = self.embedding_proj(embedding).unsqueeze(1).expand(-1, seq_len, -1)
-        query = self.pos_encoding(query)
-        
         # Memory key padding mask
         if memory_mask is not None:
             memory_key_padding_mask = (memory_mask == 0)
         else:
             memory_key_padding_mask = None
+        
+        # Teacher forcing: use ground truth as decoder input during training
+        if target is not None and self.training:
+            # Project target to d_model and add positional encoding
+            query = self.input_proj(target)
+            query = self.pos_encoding(query)
+        else:
+            # Inference: broadcast embedding to sequence
+            query = self.embedding_proj(embedding).unsqueeze(1).expand(-1, seq_len, -1)
+            query = self.pos_encoding(query)
         
         # Transformer decoder (cross-attention to encoder output)
         output = self.transformer(
@@ -207,10 +223,10 @@ class TransformerAutoencoder(nn.Module):
         input_dim: int,
         d_model: int = 256,
         nhead: int = 8,
-        num_layers: int = 6,
-        dim_feedforward: int = 1024,
+        num_layers: int = 2,
+        dim_feedforward: int = 512,
         embedding_dim: int = 128,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
         max_len: int = 500,
     ):
         super().__init__()
@@ -259,8 +275,8 @@ class TransformerAutoencoder(nn.Module):
         # Encode
         embedding, encoder_output = self.encoder(x, mask)
         
-        # Decode
-        reconstructed = self.decoder(embedding, encoder_output, seq_len, mask)
+        # Decode (pass x as target for teacher forcing during training)
+        reconstructed = self.decoder(embedding, encoder_output, seq_len, mask, target=x)
         
         return reconstructed, embedding
     
@@ -303,10 +319,10 @@ def create_transformer_autoencoder(config: dict) -> TransformerAutoencoder:
         input_dim=config.get("feature_dim", 32),
         d_model=config.get("hidden_dim", 256),
         nhead=config.get("num_heads", 8),
-        num_layers=config.get("num_layers", 6),
-        dim_feedforward=config.get("ff_dim", 1024),
+        num_layers=config.get("num_layers", 2),
+        dim_feedforward=config.get("ff_dim", 512),
         embedding_dim=config.get("embedding_dim", 128),
-        dropout=config.get("dropout", 0.1),
+        dropout=config.get("dropout", 0.2),
     )
 
 

@@ -398,22 +398,26 @@ def main():
         m = r['user_level']
         print(f"{name:<15} {m['auc_roc']:>10.4f} {m['precision']:>10.4f} {m['recall']:>10.4f} {m['f1_score']:>10.4f}")
     
+    # Create model-specific output directory
+    model_dir = args.output.parent / args.model if args.model != "both" else args.output.parent
+    model_dir.mkdir(parents=True, exist_ok=True)
+    
     # Save results (merge with existing)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
+    output_path = model_dir / args.output.name if args.model != "both" else args.output
     
     final_results = results
-    if args.output.exists():
+    if output_path.exists():
         try:
-            print(f"Merging with existing report at {args.output}")
-            old_results = load_json(args.output)
+            print(f"Merging with existing report at {output_path}")
+            old_results = load_json(output_path)
             old_results.update(results)
             final_results = old_results
         except Exception as e:
             print(f"Warning: Could not merge with existing results: {e}")
             
-    save_json(final_results, args.output)
+    save_json(final_results, output_path)
     
-    print(f"\nEvaluation report saved to: {args.output}")
+    print(f"\nEvaluation report saved to: {output_path}")
     
     # Export session details CSV for each model
     print("\n" + "=" * 60)
@@ -421,8 +425,12 @@ def main():
     print("=" * 60)
     
     for model_type, model_results in results.items():
+        # Create model-specific directory for exports
+        export_dir = args.output.parent / model_type
+        export_dir.mkdir(parents=True, exist_ok=True)
+        
         # Export session details CSV
-        csv_path = args.output.parent / f"session_details_{model_type}.csv"
+        csv_path = export_dir / f"session_details_{model_type}.csv"
         
         if '_errors' in model_results:
             export_session_details(
@@ -442,7 +450,7 @@ def main():
             del model_results['_threshold']
         
         # Export per-incident TTD
-        ttd_path = args.output.parent / f"ttd_per_incident_{model_type}.json"
+        ttd_path = export_dir / f"ttd_per_incident_{model_type}.json"
         if 'ttd' in model_results and 'per_incident_ttd' in model_results['ttd']:
             save_json(model_results['ttd']['per_incident_ttd'], ttd_path)
             print(f"  Per-incident TTD: {ttd_path}")

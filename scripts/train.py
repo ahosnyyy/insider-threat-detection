@@ -133,17 +133,17 @@ def main():
             hidden_dim=256,
             embedding_dim=128,
             num_layers=2,
-            dropout=0.3,
+            dropout=0.2,
         )
     else:
         model = TransformerAutoencoder(
             input_dim=feature_dim,
             d_model=256,
             nhead=8,
-            num_layers=6,
-            dim_feedforward=1024,
+            num_layers=2,
+            dim_feedforward=512,
             embedding_dim=128,
-            dropout=0.1,
+            dropout=0.2,
         )
     
     total_params = sum(p.numel() for p in model.parameters())

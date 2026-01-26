@@ -283,9 +283,15 @@ def prepare_training_data(
         try:
             logger.info(f"Saving training data to cache: {cache_path}")
             with open(cache_path, 'wb') as f:
-                pickle.dump(result, f)
+                pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+            cache_size_mb = cache_path.stat().st_size / (1024 * 1024)
+            logger.info(f"Cache saved successfully ({cache_size_mb:.1f} MB)")
+        except MemoryError:
+            logger.warning(f"Failed to save cache: Out of memory (data too large)")
+        except OSError as e:
+            logger.warning(f"Failed to save cache: {e} (check disk space)")
         except Exception as e:
-            logger.warning(f"Failed to save cache: {e}")
+            logger.warning(f"Failed to save cache: {type(e).__name__}: {e}")
             
     return result
 
@@ -476,8 +482,14 @@ def prepare_training_data_temporal(
         try:
             logger.info(f"Saving temporal training data to cache: {cache_path}")
             with open(cache_path, 'wb') as f:
-                pickle.dump(result, f)
+                pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+            cache_size_mb = cache_path.stat().st_size / (1024 * 1024)
+            logger.info(f"Cache saved successfully ({cache_size_mb:.1f} MB)")
+        except MemoryError:
+            logger.warning(f"Failed to save cache: Out of memory (data too large)")
+        except OSError as e:
+            logger.warning(f"Failed to save cache: {e} (check disk space)")
         except Exception as e:
-            logger.warning(f"Failed to save cache: {e}")
+            logger.warning(f"Failed to save cache: {type(e).__name__}: {e}")
             
     return result

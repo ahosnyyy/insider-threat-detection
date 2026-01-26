@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data import FeatureExtractor, get_session_dataframe, prepare_training_data
 from src.models import LSTMAutoencoder, TransformerAutoencoder, create_lstm_autoencoder, create_transformer_autoencoder
-from src.utils import setup_logging, load_config
+from src.utils import setup_logging, load_config, load_ground_truth
 
 logger = logging.getLogger(__name__)
 
@@ -204,13 +204,17 @@ def main():
     plt.gca().invert_yaxis()  # Best feature at top
     plt.tight_layout()
     
-    output_path = args.output
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path)
-    logger.info(f"Saved SHAP summary plot to {output_path}")
+    # Create model-specific output directory
+    model_dir = args.output.parent / args.model
+    model_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save text report
-    report_path = output_path.with_suffix('.txt')
+    # Save plot in model-specific folder
+    plot_path = model_dir / args.output.name
+    plt.savefig(plot_path)
+    logger.info(f"Saved SHAP summary plot to {plot_path}")
+    
+    # Save text report in model-specific folder
+    report_path = model_dir / args.output.with_suffix('.txt').name
     with open(report_path, "w") as f:
         f.write(f"SHAP Feature Importance ({args.model.upper()})\n")
         f.write("========================================\n\n")
