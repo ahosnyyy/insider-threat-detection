@@ -10,7 +10,34 @@ import pandas as pd
 
 from .features import FeatureExtractor, SequenceBuilder
 
+import hashlib
+import json
+import pickle
+from pathlib import Path
+
 logger = logging.getLogger(__name__)
+
+def _compute_config_hash(
+    feature_names: List[str],
+    sequence_length: int,
+    split_ratios: tuple,
+    temporal: bool,
+    insider_count: int,
+    db_path: Path = Path("data/processed/cert.duckdb")
+) -> str:
+    """Compute a unique hash for the dataset configuration."""
+    config = {
+        "feature_names": sorted(feature_names),
+        "sequence_length": sequence_length,
+        "split_ratios": split_ratios,
+        "temporal": temporal,
+        "insider_count": insider_count,
+        # Invalidate if DB modifies
+        "db_mtime": db_path.stat().st_mtime if db_path.exists() else 0
+    }
+    
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.md5(config_str.encode()).hexdigest()
 
 def prepare_training_data(
     df: pd.DataFrame,
@@ -22,6 +49,7 @@ def prepare_training_data(
     insider_users: Optional[List[str]] = None,
     insider_incidents: Optional[List[Dict]] = None,
     seed: int = 42,
+    use_cache: bool = True,
 ) -> Dict[str, any]:
     """
     Prepare data for autoencoder training with train/val/test split.
@@ -45,10 +73,35 @@ def prepare_training_data(
         insider_users: List of known insider user IDs
         insider_incidents: List of dicts with 'user', 'start', 'end' for session-level labels
         seed: Random seed for reproducibility
+        use_cache: If True, load/save to disk cache based on config hash
         
     Returns:
         Dict with train/val/test sequences, masks, session IDs, labels, and extractor
     """
+    # Check cache first
+    cache_path = None
+    if use_cache:
+        try:
+            # We need feature names to hash, but we haven't fitted extractor yet. 
+            # We use df columns approx.
+            config_hash = _compute_config_hash(
+                feature_names=list(df.columns),
+                sequence_length=sequence_length,
+                split_ratios=(train_ratio, val_ratio, test_ratio),
+                temporal=False,
+                insider_count=len(insider_users or []),
+            )
+            cache_dir = Path("data/processed/cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_dir / f"random_{config_hash}.pkl"
+            
+            if cache_path.exists():
+                logger.info(f"Loading cached training data from {cache_path}")
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+        except Exception as e:
+            logger.warning(f"Cache check failed: {e}")
+
     np.random.seed(seed)
     
     logger.info(f"Preparing training data from {len(df):,} sessions")
@@ -104,7 +157,12 @@ def prepare_training_data(
     
     # Separate data by USER (not session) - insider users go to test, normal users to train/val/test
     # This ensures proper evaluation: test set has ALL sessions from insider users
-    normal_user_df = df[df["label_user"] == 0].copy()  # Sessions from normal users
+    if normal_only_train:
+        normal_user_df = df[df["label_user"] == 0].copy()  # Sessions from normal users
+    else:
+        logger.warning("normal_only_train=False: Including insider users in training data! (Not recommended for Anomaly Detection)")
+        normal_user_df = df.copy() # Everyone is treated as 'normal' for training
+    
     insider_user_df = df[df["label_user"] == 1].copy()  # ALL sessions from insider users
     
     logger.info(f"Normal user sessions: {len(normal_user_df):,}, Insider user sessions: {len(insider_user_df):,}")
@@ -193,7 +251,7 @@ def prepare_training_data(
     logger.info(f"Test set (session-level): {(test_labels == 0).sum():,} normal, {(test_labels == 1).sum():,} insider")
     logger.info(f"Test set (user-level): {(test_labels_user == 0).sum():,} normal, {(test_labels_user == 1).sum():,} insider")
     
-    return {
+    result = {
         # Training data (normal only)
         "train_sequences": normal_sequences[train_idx],
         "train_masks": normal_masks[train_idx],
@@ -221,6 +279,16 @@ def prepare_training_data(
         "n_session_level_insiders": int(n_session_insiders),
     }
 
+    if cache_path:
+        try:
+            logger.info(f"Saving training data to cache: {cache_path}")
+            with open(cache_path, 'wb') as f:
+                pickle.dump(result, f)
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+            
+    return result
+
 
 def prepare_training_data_temporal(
     df: pd.DataFrame,
@@ -230,6 +298,7 @@ def prepare_training_data_temporal(
     test_ratio: float = 0.2,
     insider_users: Optional[List[str]] = None,
     insider_incidents: Optional[List[Dict]] = None,
+    use_cache: bool = True,
 ) -> Dict[str, any]:
     """
     Prepare data with TEMPORAL split (no data leakage).
@@ -241,6 +310,28 @@ def prepare_training_data_temporal(
     
     This prevents the model from "seeing the future" during training.
     """
+    # Check cache first
+    cache_path = None
+    if use_cache:
+        try:
+            config_hash = _compute_config_hash(
+                feature_names=list(df.columns),
+                sequence_length=sequence_length,
+                split_ratios=(train_ratio, val_ratio, test_ratio),
+                temporal=True,
+                insider_count=len(insider_users or []),
+            )
+            cache_dir = Path("data/processed/cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_dir / f"temporal_{config_hash}.pkl"
+            
+            if cache_path.exists():
+                logger.info(f"Loading cached temporal training data from {cache_path}")
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+        except Exception as e:
+            logger.warning(f"Cache check failed: {e}")
+
     logger.info(f"Preparing training data with TEMPORAL split")
     logger.info(f"Split: {train_ratio:.0%} train / {val_ratio:.0%} val / {test_ratio:.0%} test")
     
@@ -355,7 +446,7 @@ def prepare_training_data_temporal(
     logger.info(f"Test labels (session): {(test_labels == 0).sum():,} normal, {(test_labels == 1).sum():,} insider")
     logger.info(f"Test labels (user): {(test_labels_user == 0).sum():,} normal, {(test_labels_user == 1).sum():,} insider")
     
-    return {
+    result = {
         "train_sequences": train_seqs,
         "train_masks": train_masks,
         "train_session_ids": train_ids,
@@ -380,3 +471,13 @@ def prepare_training_data_temporal(
         "n_user_level_insiders": int(n_user_insiders),
         "n_session_level_insiders": int(n_session_insiders),
     }
+
+    if cache_path:
+        try:
+            logger.info(f"Saving temporal training data to cache: {cache_path}")
+            with open(cache_path, 'wb') as f:
+                pickle.dump(result, f)
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+            
+    return result
