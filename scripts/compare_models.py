@@ -1,28 +1,61 @@
 import argparse
 import json
 import logging
-import sys
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.utils import load_config
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.utils import load_config
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def compare_models(report_path: Path, output_dir: Path):
-    """Visualize model comparison."""
-    if not report_path.exists():
-        logger.error(f"Report not found: {report_path}")
-        return 1
+def load_reports(input_path: Path):
+    """Load one or more reports from directory or file."""
+    results = {}
+    
+    if input_path.is_file():
+        # Load single file
+        with open(input_path, 'r') as f:
+            data = json.load(f)
+            results.update(data)
+    elif input_path.is_dir():
+        # Look for evaluation_report.json in subdirectories
+        for report_file in input_path.glob("*/evaluation_report.json"):
+            try:
+                with open(report_file, 'r') as f:
+                    data = json.load(f)
+                    results.update(data)
+            except Exception as e:
+                logger.warning(f"Could not load {report_file}: {e}")
+                
+        # Also check root if exists
+        root_report = input_path / "evaluation_report.json"
+        if root_report.exists():
+            with open(root_report, 'r') as f:
+                data = json.load(f)
+                results.update(data)
+                
+    return results
 
-    with open(report_path, 'r') as f:
-        results = json.load(f)
+def compare_models(input_path: Path, output_dir: Path):
+    """Visualize model comparison."""
+    results = load_reports(input_path)
         
     if not results:
-        logger.error("Empty report")
+        logger.error(f"No results found at {input_path}")
         return 1
         
     logger.info(f"Comparing models: {list(results.keys())}")
@@ -86,7 +119,7 @@ def compare_models(report_path: Path, output_dir: Path):
         df_ttd = pd.DataFrame(ttd_data)
         
         plt.figure(figsize=(8, 5))
-        sns.barplot(data=df_ttd, x='Model', y='TTD (Hours)', palette='rocket')
+        sns.barplot(data=df_ttd, x='Model', y='TTD (Hours)', hue='Model', palette='rocket', legend=False)
         plt.title('Time-to-Detect (Mean Hours)')
         plt.tight_layout()
         plt.savefig(output_dir / "model_comparison_ttd.png")
@@ -95,9 +128,18 @@ def compare_models(report_path: Path, output_dir: Path):
     return 0
 
 def main():
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(description="Compare models from evaluation report")
-    parser.add_argument("--input", type=Path, default=Path("results/evaluation_report.json"))
-    parser.add_argument("--output-dir", type=Path, default=Path("results"))
+    
+    # Use config output_path but point to results directory usually
+    # Assuming report is in results/evaluation_report.json relative to project root
+    # But cfg['data']['output_path'] is data/outputs
+    
+    parser.add_argument("--input", type=Path, default=Path("results"),
+                        help="Path to results directory or specific report file")
+    parser.add_argument("--output-dir", type=Path, default=Path("results/comparison"),
+                        help="Directory to save plots")
     args = parser.parse_args()
     
     args.output_dir.mkdir(parents=True, exist_ok=True)

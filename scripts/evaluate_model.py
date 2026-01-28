@@ -27,15 +27,29 @@ from src.data import get_session_dataframe, prepare_training_data
 from src.models import LSTMAutoencoder, TransformerAutoencoder
 from src.training import ModelEvaluator
 from src.training.metrics import compute_ttd
-from src.utils import setup_logging, load_ground_truth, save_json, load_json
+from src.utils import setup_logging, load_ground_truth, save_json, load_json, load_config
 
 
-def load_model(model_path: Path, model_type: str, feature_dim: int):
+def load_model(model_path: Path, model_type: str, feature_dim: int, cfg: dict):
     """Load saved model checkpoint."""
     if model_type == "lstm":
-        model = LSTMAutoencoder(input_dim=feature_dim)
+        model = LSTMAutoencoder(
+            input_dim=feature_dim,
+            hidden_dim=cfg['model']['hidden_dim'],
+            embedding_dim=cfg['model']['embedding_dim'],
+            num_layers=cfg['model']['num_layers'],
+            dropout=cfg['model']['dropout'],
+        )
     else:
-        model = TransformerAutoencoder(input_dim=feature_dim)
+        model = TransformerAutoencoder(
+            input_dim=feature_dim,
+            d_model=cfg['model']['hidden_dim'],
+            nhead=cfg['model']['num_heads'],
+            num_layers=cfg['model']['num_layers'],
+            dim_feedforward=cfg['model']['ff_dim'],
+            embedding_dim=cfg['model']['embedding_dim'],
+            dropout=cfg['model']['dropout'],
+        )
     
     checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -189,10 +203,13 @@ def export_session_details(
 
 
 def main():
+    # Load config
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(description="Evaluate trained model with dual-level metrics")
     parser.add_argument("--model", choices=["lstm", "transformer", "both"], default="both",
                         help="Model(s) to evaluate")
-    parser.add_argument("--db-path", type=Path, default=Path("data/processed/cert.duckdb"),
+    parser.add_argument("--db-path", type=Path, default=Path(cfg['data']['database']),
                         help="Path to DuckDB database")
     parser.add_argument("--models-dir", type=Path, default=Path("models"),
                         help="Directory with saved model checkpoints")
@@ -274,7 +291,7 @@ def main():
         print(f"Evaluating {model_type.upper()} model...")
         print(f"{'=' * 60}")
         
-        model = load_model(model_path, model_type, feature_dim)
+        model = load_model(model_path, model_type, feature_dim, cfg)
         
         # Compute reconstruction errors and embeddings
         print("Computing errors and embeddings...")
@@ -290,7 +307,7 @@ def main():
         
         # Compute metrics at session-level
         print("\nSession-Level Metrics (detecting specific malicious sessions):")
-        session_metrics = compute_metrics(errors, test_labels_session)
+        session_metrics = compute_metrics(errors, test_labels_session, threshold_percentile=cfg['evaluation']['percentile'])
         print(f"  AUC-ROC:   {session_metrics['auc_roc']:.4f}")
         print(f"  Precision: {session_metrics['precision']:.4f}")
         print(f"  Recall:    {session_metrics['recall']:.4f}")
@@ -341,7 +358,7 @@ def main():
         
         # Compute metrics at user-level
         print("\nUser-Level Metrics (identifying insider users):")
-        user_metrics = compute_metrics(errors, test_labels_user)
+        user_metrics = compute_metrics(errors, test_labels_user, threshold_percentile=cfg['evaluation']['percentile'])
         print(f"  AUC-ROC:   {user_metrics['auc_roc']:.4f}")
         print(f"  Precision: {user_metrics['precision']:.4f}")
         print(f"  Recall:    {user_metrics['recall']:.4f}")

@@ -23,24 +23,26 @@ from src.data import (
     enrich_with_ldap,
     enrich_with_psychometric,
 )
-from src.utils import setup_logging
+from src.utils import setup_logging, load_config
 
 
 def main():
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(description="Ingest CERT R4.2 data")
-    parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"),
+    parser.add_argument("--raw-dir", type=Path, default=Path(cfg['data']['raw_path']),
                         help="Directory containing raw CSV files")
-    parser.add_argument("--processed-dir", type=Path, default=Path("data/processed"),
+    parser.add_argument("--processed-dir", type=Path, default=Path(cfg['data']['processed_path']),
                         help="Directory for processed Parquet files")
-    parser.add_argument("--db-path", type=Path, default=None,
-                        help="Path to DuckDB database (default: processed_dir/cert.duckdb)")
+    parser.add_argument("--db-path", type=Path, default=Path(cfg['data']['database']),
+                        help="Path to DuckDB database")
     args = parser.parse_args()
     
     setup_logging()
     
-    # Set default DB path
-    if args.db_path is None:
-        args.db_path = args.processed_dir / "cert.duckdb"
+    # Ensure processed directory exists
+    args.processed_dir.mkdir(parents=True, exist_ok=True)
+    args.db_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Check raw directory exists
     if not args.raw_dir.exists():

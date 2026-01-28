@@ -16,19 +16,21 @@ model:
   embedding_dim: 128
   hidden_dim: 256
   num_layers: 2
-  dropout: 0.3
+  dropout: 0.2  # Matched hardcoded default
   
   # Transformer-specific
   num_heads: 8
-  ff_dim: 1024
+  ff_dim: 512   # Matched hardcoded default
 
 # Training
 training:
   batch_size: 64
-  epochs: 50
+  epochs: 200
   learning_rate: 0.001
   patience: 10  # Early stopping
-  train_split: 0.8
+  train_split: 0.7
+  val_ratio: 0.1
+  test_ratio: 0.2
   seed: 42
 
 # Evaluation

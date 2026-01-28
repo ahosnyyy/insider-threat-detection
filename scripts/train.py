@@ -28,14 +28,17 @@ from src.utils import load_config, setup_logging, load_ground_truth, save_json
 
 
 def main():
+    # Load config
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(description="Train autoencoder model")
-    parser.add_argument("--model", choices=["lstm", "transformer"], default="lstm",
+    parser.add_argument("--model", choices=["lstm", "transformer"], default=cfg['model']['type'],
                         help="Model type to train")
-    parser.add_argument("--epochs", type=int, default=50,
+    parser.add_argument("--epochs", type=int, default=cfg['training']['epochs'],
                         help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=64,
+    parser.add_argument("--batch-size", type=int, default=cfg['training']['batch_size'],
                         help="Batch size")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=cfg['training']['learning_rate'],
                         help="Learning rate")
     parser.add_argument("--eval-every", type=int, default=5,
                         help="Evaluate on test set every N epochs")
@@ -43,7 +46,7 @@ def main():
                         help="Number of steps to accumulate gradients")
     parser.add_argument("--temporal-split", action="store_true",
                         help="Use temporal split (time-based, no leakage) instead of random")
-    parser.add_argument("--db-path", type=Path, default=Path("data/processed/cert.duckdb"),
+    parser.add_argument("--db-path", type=Path, default=Path(cfg['data']['database']),
                         help="Path to DuckDB database")
     parser.add_argument("--answers-dir", type=Path, default=Path("data/raw/answers"),
                         help="Directory with ground truth labels")
@@ -89,25 +92,29 @@ def main():
     
     # Prepare training data
     split_type = "TEMPORAL" if args.temporal_split else "RANDOM"
-    print(f"\nPreparing training data ({split_type} split, 70/10/20)...")
+    train_ratio = cfg['training']['train_split']
+    val_ratio = cfg['training']['val_ratio']
+    test_ratio = cfg['training']['test_ratio']
+    
+    print(f"\nPreparing training data ({split_type} split, {int(train_ratio*100)}/{int(val_ratio*100)}/{int(test_ratio*100)})...")
     
     if args.temporal_split:
         train_data = prepare_training_data_temporal(
             df,
-            sequence_length=100,
-            train_ratio=0.7,
-            val_ratio=0.1,
-            test_ratio=0.2,
+            sequence_length=cfg['features']['sequence_length'],
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
             insider_users=insider_users,
             insider_incidents=insider_incidents,
         )
     else:
         train_data = prepare_training_data(
             df,
-            sequence_length=100,
-            train_ratio=0.7,
-            val_ratio=0.1,
-            test_ratio=0.2,
+            sequence_length=cfg['features']['sequence_length'],
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
             normal_only_train=len(insider_users) > 0,
             insider_users=insider_users,
             insider_incidents=insider_incidents,
@@ -130,20 +137,20 @@ def main():
     if args.model == "lstm":
         model = LSTMAutoencoder(
             input_dim=feature_dim,
-            hidden_dim=256,
-            embedding_dim=128,
-            num_layers=2,
-            dropout=0.2,
+            hidden_dim=cfg['model']['hidden_dim'],
+            embedding_dim=cfg['model']['embedding_dim'],
+            num_layers=cfg['model']['num_layers'],
+            dropout=cfg['model']['dropout'],
         )
     else:
         model = TransformerAutoencoder(
             input_dim=feature_dim,
-            d_model=256,
-            nhead=8,
-            num_layers=2,
-            dim_feedforward=512,
-            embedding_dim=128,
-            dropout=0.2,
+            d_model=cfg['model']['hidden_dim'],  # Using hidden_dim as d_model base
+            nhead=cfg['model']['num_heads'],
+            num_layers=cfg['model']['num_layers'],
+            dim_feedforward=cfg['model']['ff_dim'],
+            embedding_dim=cfg['model']['embedding_dim'],
+            dropout=cfg['model']['dropout'],
         )
     
     total_params = sum(p.numel() for p in model.parameters())
@@ -155,11 +162,15 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.lr,
-        patience=10,
+        patience=cfg['training']['patience'],
         checkpoint_dir=args.output_dir,
         eval_every=args.eval_every,
         accumulation_steps=args.accumulation_steps,
     )
+    
+    # Set seed
+    torch.manual_seed(cfg['training']['seed'])
+    np.random.seed(cfg['training']['seed'])
     
     print(f"\nTraining Configuration:")
     print(f"  Device: {config.device}")

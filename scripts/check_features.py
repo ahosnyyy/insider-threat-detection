@@ -32,7 +32,7 @@ def main():
     print(f"Numeric features list: {extractor.feature_names}")
     print("-" * 50)
     print(f"Role categories count: {len(extractor.role_categories) if extractor.role_categories else 0}")
-    # print(f"Role categories: {extractor.role_categories}") # List might be long
+    print(f"Role categories: {extractor.role_categories}") # List might be long
     print("-" * 50)
     print(f"Total feature dimension: {extractor.get_feature_dim()}")
     print("-" * 50)

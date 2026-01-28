@@ -1,6 +1,7 @@
 import argparse
 import logging
 from pathlib import Path
+import sys
 
 import duckdb
 import pandas as pd
@@ -62,4 +63,4 @@ def main():
     validate_data(args.db_path)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -32,7 +32,7 @@ from tqdm import tqdm
 
 from src.data import get_session_dataframe, FeatureExtractor, SequenceBuilder
 from src.models import LSTMAutoencoder, TransformerAutoencoder
-from src.utils import setup_logging
+from src.utils import setup_logging, load_config
 
 
 @dataclass
@@ -53,10 +53,12 @@ class InferenceEngine:
         self,
         model_path: Path,
         model_type: str = "lstm",
+        config: dict = None,
         device: str = None,
     ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_type = model_type
+        self.config = config
         
         # Load model
         self.model = self._load_model(model_path)
@@ -86,9 +88,23 @@ class InferenceEngine:
             feature_dim = 24  # Default
         
         if self.model_type == "lstm":
-            model = LSTMAutoencoder(input_dim=feature_dim)
+            model = LSTMAutoencoder(
+                input_dim=feature_dim,
+                hidden_dim=self.config['model']['hidden_dim'] if self.config else 256,
+                embedding_dim=self.config['model']['embedding_dim'] if self.config else 128,
+                num_layers=self.config['model']['num_layers'] if self.config else 2,
+                dropout=self.config['model']['dropout'] if self.config else 0.2,
+            )
         else:
-            model = TransformerAutoencoder(input_dim=feature_dim)
+            model = TransformerAutoencoder(
+                input_dim=feature_dim,
+                d_model=self.config['model']['hidden_dim'] if self.config else 256,
+                nhead=self.config['model']['num_heads'] if self.config else 8,
+                num_layers=self.config['model']['num_layers'] if self.config else 2,
+                dim_feedforward=self.config['model']['ff_dim'] if self.config else 1024,
+                embedding_dim=self.config['model']['embedding_dim'] if self.config else 128,
+                dropout=self.config['model']['dropout'] if self.config else 0.2,
+            )
         
         model.load_state_dict(state_dict)
         model.to(self.device)
@@ -261,6 +277,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     args = parser.parse_args()
     
+    cfg = load_config()
+    
     setup_logging()
     
     # Set default model path
@@ -288,7 +306,7 @@ def main():
     print(f"Loaded {len(df):,} sessions")
     
     # Initialize engine
-    engine = InferenceEngine(args.model_path, args.model)
+    engine = InferenceEngine(args.model_path, args.model, config=cfg)
     
     if args.session_id:
         # Single session
