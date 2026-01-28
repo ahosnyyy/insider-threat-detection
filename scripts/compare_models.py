@@ -115,6 +115,18 @@ def compare_models(input_path: Path, output_dir: Path):
                 'TTD (Sessions)': ttd.get('ttd_sessions_mean', 0)
             })
             
+    # Performance Comparison
+    perf_data = []
+    for model_name, res in results.items():
+        if 'performance' in res:
+            perf = res['performance']
+            perf_data.append({
+                'Model': model_name,
+                'Throughput (sessions/sec)': perf.get('throughput_sessions_per_sec', 0),
+                'Latency (ms)': perf.get('latency_ms_per_session', 0),
+                'Memory (MB)': perf.get('peak_cpu_memory_mb', 0)
+            })
+
     if ttd_data:
         df_ttd = pd.DataFrame(ttd_data)
         
@@ -124,6 +136,25 @@ def compare_models(input_path: Path, output_dir: Path):
         plt.tight_layout()
         plt.savefig(output_dir / "model_comparison_ttd.png")
         logger.info(f"TTD Comparison saved to {output_dir / 'model_comparison_ttd.png'}")
+        
+    if perf_data:
+        df_perf = pd.DataFrame(perf_data)
+        
+        # Plot Throughput
+        plt.figure(figsize=(8, 5))
+        sns.barplot(data=df_perf, x='Model', y='Throughput (sessions/sec)', hue='Model', palette='Greens', legend=False)
+        plt.title('Inference Throughput (Higher is Better)')
+        plt.tight_layout()
+        plt.savefig(output_dir / "model_comparison_throughput.png")
+        logger.info(f"Throughput plot saved to {output_dir / 'model_comparison_throughput.png'}")
+        
+        # Plot Memory
+        plt.figure(figsize=(8, 5))
+        sns.barplot(data=df_perf, x='Model', y='Memory (MB)', hue='Model', palette='Blues', legend=False)
+        plt.title('Peak Memory Usage (Lower is Better)')
+        plt.tight_layout()
+        plt.savefig(output_dir / "model_comparison_memory.png")
+        logger.info(f"Memory plot saved to {output_dir / 'model_comparison_memory.png'}")
     
     return 0
 
