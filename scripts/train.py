@@ -60,9 +60,9 @@ def main():
     
     # Dry run settings
     if args.dry_run:
-        args.epochs = 2
+        args.epochs = 5
         args.eval_every = 1
-        print("DRY RUN MODE: Training for 2 epochs only")
+        print("DRY RUN MODE: Training for 5 epochs only")
     
     # Check database exists
     if not args.db_path.exists():
@@ -89,6 +89,14 @@ def main():
         insider_incidents = ground_truth.get('insider_incidents', [])
         n_events = len(ground_truth.get('malicious_events', []))
         print(f"Found {len(insider_users)} insider users, {len(insider_incidents)} incidents, {n_events} events")
+
+    # In dry-run mode, also downsample data to avoid huge allocations.
+    # This keeps the run fast and prevents multi-GB sequence tensors.
+    if args.dry_run:
+        max_sessions = 20_000
+        if len(df) > max_sessions:
+            df = df.sample(n=max_sessions, random_state=cfg['training']['seed']).reset_index(drop=True)
+            print(f"DRY RUN MODE: Downsampled sessions to {len(df):,} for quick iteration (cache disabled)")
     
     # Prepare training data
     split_type = "TEMPORAL" if args.temporal_split else "RANDOM"
@@ -107,6 +115,7 @@ def main():
             test_ratio=test_ratio,
             insider_users=insider_users,
             insider_incidents=insider_incidents,
+            use_cache=not args.dry_run,
         )
     else:
         train_data = prepare_training_data(
@@ -118,6 +127,7 @@ def main():
             normal_only_train=len(insider_users) > 0,
             insider_users=insider_users,
             insider_incidents=insider_incidents,
+            use_cache=not args.dry_run,
         )
     
     print(f"Train sequences: {train_data['train_sequences'].shape}")
@@ -166,6 +176,8 @@ def main():
         checkpoint_dir=args.output_dir,
         eval_every=args.eval_every,
         accumulation_steps=args.accumulation_steps,
+        threshold_method=cfg['evaluation'].get('threshold_method', 'percentile'),
+        threshold_percentile=cfg['evaluation'].get('percentile', 95),
     )
     
     # Set seed

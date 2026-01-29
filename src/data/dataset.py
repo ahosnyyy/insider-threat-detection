@@ -99,8 +99,17 @@ def prepare_training_data(
                 logger.info(f"Loading cached training data from {cache_path}")
                 with open(cache_path, 'rb') as f:
                     return pickle.load(f)
-        except Exception as e:
-            logger.warning(f"Cache check failed: {e}")
+        except BaseException as e:
+            # Some pickle/buffer failures can surface as SystemError with empty message.
+            msg = f"{type(e).__name__}: {e}"
+            logger.warning(f"Cache load failed for {cache_path}: {msg}")
+            # If cache seems corrupted/unreadable, remove it to avoid repeated failures.
+            if cache_path is not None:
+                try:
+                    cache_path.unlink(missing_ok=True)
+                    logger.warning(f"Removed unreadable cache file: {cache_path}")
+                except Exception as del_e:
+                    logger.warning(f"Failed to remove cache file {cache_path}: {type(del_e).__name__}: {del_e}")
 
     np.random.seed(seed)
     
@@ -335,8 +344,15 @@ def prepare_training_data_temporal(
                 logger.info(f"Loading cached temporal training data from {cache_path}")
                 with open(cache_path, 'rb') as f:
                     return pickle.load(f)
-        except Exception as e:
-            logger.warning(f"Cache check failed: {e}")
+        except BaseException as e:
+            msg = f"{type(e).__name__}: {e}"
+            logger.warning(f"Cache load failed for {cache_path}: {msg}")
+            if cache_path is not None:
+                try:
+                    cache_path.unlink(missing_ok=True)
+                    logger.warning(f"Removed unreadable cache file: {cache_path}")
+                except Exception as del_e:
+                    logger.warning(f"Failed to remove cache file {cache_path}: {type(del_e).__name__}: {del_e}")
 
     logger.info(f"Preparing training data with TEMPORAL split")
     logger.info(f"Split: {train_ratio:.0%} train / {val_ratio:.0%} val / {test_ratio:.0%} test")

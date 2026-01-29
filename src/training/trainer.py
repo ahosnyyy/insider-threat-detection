@@ -35,7 +35,11 @@ class TrainConfig:
     log_dir: Path = Path("runs")  # TensorBoard log directory
     tensorboard: bool = True  # Enable TensorBoard logging
     eval_every: int = 5  # Evaluate on test set every N epochs
-    threshold_percentile: float = 95.0  # Percentile for anomaly threshold
+    # Thresholding strategy for converting reconstruction error to anomaly label.
+    # - "percentile": use fixed percentile of error distribution
+    # - "f1_optimal": choose threshold that maximizes F1 on the evaluated set
+    threshold_method: str = "percentile"
+    threshold_percentile: float = 95.0  # Percentile for anomaly threshold (fallback/default)
     accumulation_steps: int = 1  # Gradient accumulation steps
     
 
@@ -443,8 +447,13 @@ class Trainer:
         Higher error = more likely anomaly.
         """
         from sklearn.metrics import (
-            accuracy_score, precision_score, recall_score, 
-            f1_score, roc_auc_score, confusion_matrix
+            accuracy_score,
+            precision_score,
+            recall_score,
+            f1_score,
+            roc_auc_score,
+            confusion_matrix,
+            precision_recall_curve,
         )
         
         self.model.eval()
@@ -466,8 +475,31 @@ class Trainer:
         
         all_errors = np.array(all_errors)
         
-        # Determine threshold using percentile of errors
-        threshold = np.percentile(all_errors, self.config.threshold_percentile)
+        # Determine threshold for converting scores to binary predictions
+        if self.config.threshold_method == "f1_optimal":
+            # Use F1-optimal threshold based on precision-recall curve.
+            # Note: This optimizes on the current evaluation set.
+            try:
+                precision_arr, recall_arr, pr_thresholds = precision_recall_curve(
+                    test_labels, all_errors
+                )
+                # Last element of precision/recall corresponds to a threshold
+                # that is effectively +inf; ignore it when computing F1.
+                if pr_thresholds.size > 0:
+                    f1_scores = 2 * (precision_arr[:-1] * recall_arr[:-1]) / (
+                        precision_arr[:-1] + recall_arr[:-1] + 1e-8
+                    )
+                    best_idx = int(np.argmax(f1_scores))
+                    threshold = pr_thresholds[best_idx]
+                else:
+                    # Fallback to percentile if thresholds are not available
+                    threshold = np.percentile(all_errors, self.config.threshold_percentile)
+            except Exception:
+                # Any issue with PR curve computation: fall back to percentile
+                threshold = np.percentile(all_errors, self.config.threshold_percentile)
+        else:
+            # Default: fixed percentile of reconstruction error distribution
+            threshold = np.percentile(all_errors, self.config.threshold_percentile)
         
         # Predict: 1 if error > threshold (anomaly), 0 otherwise
         predictions = (all_errors > threshold).astype(int)

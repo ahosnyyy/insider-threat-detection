@@ -50,17 +50,35 @@ class LSTMEncoder(nn.Module):
             hidden: Tuple of hidden states for decoder
         """
         # LSTM forward
+        # output: (batch, seq_len, hidden_dim * num_directions)
+        # For bidirectional: already concatenated [forward; backward]
         output, (h_n, c_n) = self.lstm(x)
         
-        # Use last hidden state (concat forward and backward if bidirectional)
-        if self.bidirectional:
-            # Concat last layer forward and backward
-            h_last = torch.cat([h_n[-2], h_n[-1]], dim=1)
+        # Mask-aware pooling: use mean of non-padded positions
+        if mask is not None:
+            # output: (batch, seq_len, hidden_dim * num_directions)
+            # mask: (batch, seq_len)
+            mask_expanded = mask.unsqueeze(-1)  # (batch, seq_len, 1)
+            
+            # Zero out padded positions
+            masked_output = output * mask_expanded
+            
+            # Compute sequence lengths (number of non-padded positions)
+            seq_lengths = mask.sum(dim=1, keepdim=True)  # (batch, 1)
+            seq_lengths = torch.clamp(seq_lengths, min=1.0)  # Avoid division by zero
+            
+            # Mean pooling over sequence length
+            pooled = masked_output.sum(dim=1) / seq_lengths  # (batch, hidden_dim * num_directions)
         else:
-            h_last = h_n[-1]
+            # Fallback: use last hidden state (original behavior)
+            if self.bidirectional:
+                # Concat last layer forward and backward
+                pooled = torch.cat([h_n[-2], h_n[-1]], dim=1)
+            else:
+                pooled = h_n[-1]
         
         # Project to embedding
-        embedding = self.fc(h_last)
+        embedding = self.fc(pooled)
         
         return embedding, (h_n, c_n)
 
