@@ -193,6 +193,8 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.lr,
+        weight_decay=float(cfg['training'].get('weight_decay', 0)),
+        warmup_epochs=int(cfg['training'].get('warmup_epochs', 0)),
         patience=cfg['training']['patience'],
         checkpoint_dir=args.output_dir,
         eval_every=args.eval_every,

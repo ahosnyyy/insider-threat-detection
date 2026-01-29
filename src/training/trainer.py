@@ -81,6 +81,7 @@ class Trainer:
         self.optimizer = torch.optim.Adam(
             model.parameters(),
             lr=config.learning_rate,
+            weight_decay=config.weight_decay,
         )
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
@@ -88,6 +89,8 @@ class Trainer:
             factor=0.5,
             patience=5,
         )
+        self._base_lr = config.learning_rate
+        self._warmup_epochs = config.warmup_epochs
         self.criterion = nn.MSELoss(reduction='none')
         self.early_stopping = EarlyStopping(config.patience, config.min_delta)
         
@@ -207,8 +210,13 @@ class Trainer:
             self.history['val_loss'].append(val_loss)
             self.history['epoch_time'].append(epoch_time)
             
-            # Scheduler step
-            self.scheduler.step(val_loss)
+            # Learning rate: warm-up then ReduceLROnPlateau
+            if self._warmup_epochs > 0 and epoch < self._warmup_epochs:
+                warmup_lr = self._base_lr * (epoch + 1) / self._warmup_epochs
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = warmup_lr
+            else:
+                self.scheduler.step(val_loss)
             
             # Logging
             current_lr = self.optimizer.param_groups[0]['lr']
