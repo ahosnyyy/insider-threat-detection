@@ -130,6 +130,11 @@ class Trainer:
             'user_f1_score': [],
             'user_fpr': [],
             'user_auc_roc': [],
+            # Confusion matrix values (user-level)
+            'user_tp': [],
+            'user_tn': [],
+            'user_fp': [],
+            'user_fn': [],
             # Time-to-Detect metrics
             'ttd_hours_mean': [],
             'ttd_hours_median': [],
