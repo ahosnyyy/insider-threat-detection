@@ -54,9 +54,20 @@ def main():
                         help="Directory to save model checkpoints")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run with minimal epochs for testing")
+    parser.add_argument("--role-features", type=str,
+                        choices=["none", "roles", "units"],
+                        default=cfg["features"].get("role_features", "none"),
+                        help="Role features: none | roles (42 one-hot) | units (6 from role_units.yaml)")
     parser.add_argument("--include-role", action="store_true",
-                        help="Include role categories as one-hot encoded features (default: False)")
+                        help="Alias for --role-features roles (deprecated)")
+    parser.add_argument("--role-mapping-file", type=Path,
+                        default=Path(cfg["features"].get("role_mapping_file", "config/role_units.yaml")),
+                        help="Path to role_units.yaml (used when --role-features units)")
     args = parser.parse_args()
+    
+    # Alias: --include-role => --role-features roles
+    if args.include_role:
+        args.role_features = "roles"
     
     setup_logging()
     
@@ -108,6 +119,10 @@ def main():
     
     print(f"\nPreparing training data ({split_type} split, {int(train_ratio*100)}/{int(val_ratio*100)}/{int(test_ratio*100)})...")
     
+    role_mapping_file = args.role_mapping_file
+    if role_mapping_file and not role_mapping_file.is_absolute():
+        role_mapping_file = Path(__file__).parent.parent / role_mapping_file
+    
     if args.temporal_split:
         train_data = prepare_training_data_temporal(
             df,
@@ -118,7 +133,8 @@ def main():
             insider_users=insider_users,
             insider_incidents=insider_incidents,
             use_cache=not args.dry_run,
-            include_role=args.include_role,
+            role_features=args.role_features,
+            role_mapping_file=role_mapping_file if args.role_features == "units" else None,
         )
     else:
         train_data = prepare_training_data(
@@ -131,7 +147,8 @@ def main():
             insider_users=insider_users,
             insider_incidents=insider_incidents,
             use_cache=not args.dry_run,
-            include_role=args.include_role,
+            role_features=args.role_features,
+            role_mapping_file=role_mapping_file if args.role_features == "units" else None,
         )
     
     print(f"Train sequences: {train_data['train_sequences'].shape}")

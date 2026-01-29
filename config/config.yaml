@@ -9,6 +9,9 @@ data:
 features:
   sequence_length: 100  # Max events per session
   feature_dim: 32       # Features per event
+  # Role features: none | roles (42 one-hot) | units (6 one-hot from role_units.yaml)
+  role_features: none
+  role_mapping_file: config/role_units.yaml  # Used when role_features: units
 
 # Model architecture
 model:

@@ -1,0 +1,69 @@
+# Role → Functional unit mapping (Option A: by unit).
+# Order of units defines one-hot encoding order (index 0 = first unit, etc.).
+# Unknown roles (not in any list) can be assigned default_unit if configured.
+
+unit_order:
+  - Administration
+  - "Research and Engineering"
+  - Manufacturing
+  - Finance
+  - "Sales and Marketing"
+  - "Purchase and Contracting"
+
+# Default unit for roles not found in any list (optional). Omit or null to warn only.
+# default_unit: Administration
+
+# Map each unit to list of role names (CERT R4.2 role categories).
+Administration:
+  - AdministrativeAssistant
+  - AdministrativeStaff
+  - Director
+  - Manager
+  - President
+  - VicePresident
+  - HumanResourceSpecialist
+  - ITAdmin
+  - ManagementTrainer
+  - InstructionalCoordinator
+  - SecurityGuard
+  - Attorney
+  - Nurse
+  - NursePractitioner
+
+"Research and Engineering":
+  - ChiefEngineer
+  - ComputerProgrammer
+  - ComputerScientist
+  - ComputerTrainer
+  - ElectricalEngineer
+  - Engineer
+  - FieldServiceEngineer
+  - HardwareEngineer
+  - HealthSafetyEngineer
+  - IndustrialEngineer
+  - MaterialsEngineer
+  - Mathematician
+  - MechanicalEngineer
+  - Physicist
+  - Scientist
+  - SoftwareEngineer
+  - Statistician
+  - SystemsEngineer
+  - TechnicalTrainer
+  - TestEngineer
+
+Manufacturing:
+  - AssemblySupervisor
+  - ProductionLineWorker
+  - LabManager
+  - Technician
+
+Finance:
+  - Accountant
+  - FinancialAnalyst
+
+"Sales and Marketing":
+  - Salesman
+
+"Purchase and Contracting":
+  - PurchasingClerk
