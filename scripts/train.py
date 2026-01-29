@@ -63,11 +63,21 @@ def main():
     parser.add_argument("--role-mapping-file", type=Path,
                         default=Path(cfg["features"].get("role_mapping_file", "config/role_units.yaml")),
                         help="Path to role_units.yaml (used when --role-features units)")
+    parser.add_argument("--weighted-loss", action="store_true",
+                        help="Use hard mining: focus loss on top-k%% hardest samples per batch (training only)")
+    parser.add_argument("--hard-mining-ratio", type=float,
+                        default=cfg["training"].get("hard_mining_ratio", 0.1),
+                        help="Fraction of hardest samples when --weighted-loss (default: 0.1)")
     args = parser.parse_args()
     
     # Alias: --include-role => --role-features roles
     if args.include_role:
         args.role_features = "roles"
+    # Map --weighted-loss flag to config
+    if args.weighted_loss:
+        args.weighted_loss_mode = "hard_mining"
+    else:
+        args.weighted_loss_mode = cfg["training"].get("weighted_loss", "none")
     
     setup_logging()
     
@@ -195,6 +205,8 @@ def main():
         learning_rate=args.lr,
         weight_decay=float(cfg['training'].get('weight_decay', 0)),
         warmup_epochs=int(cfg['training'].get('warmup_epochs', 0)),
+        weighted_loss=getattr(args, 'weighted_loss_mode', cfg['training'].get('weighted_loss', 'none')),
+        hard_mining_ratio=float(args.hard_mining_ratio),
         patience=cfg['training']['patience'],
         checkpoint_dir=args.output_dir,
         eval_every=args.eval_every,

@@ -1,5 +1,15 @@
 # Weighted Loss Explained
 
+## Implemented: Hard Mining (CLI)
+
+**Branch:** `feature/weighted-loss`
+
+- **CLI:** `--weighted-loss` enables hard mining (focus loss on top-k% hardest samples per batch). **Training only**; validation loss is unchanged (mean over all val samples).
+- **Config:** `training.weighted_loss: none | hard_mining`, `training.hard_mining_ratio: 0.1`.
+- **Usage:** `python scripts/train.py --model lstm --weighted-loss` or `--weighted-loss --hard-mining-ratio 0.2`.
+
+---
+
 ## What is Weighted Loss?
 
 **Weighted loss** is a technique to handle **class imbalance** by giving more importance to underrepresented classes during training. Instead of treating all samples equally, you multiply each sample's loss by a weight that reflects its importance.

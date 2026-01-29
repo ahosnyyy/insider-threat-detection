@@ -30,6 +30,8 @@ class TrainConfig:
     learning_rate: float = 0.001
     weight_decay: float = 0.0  # L2 regularization (e.g. 1e-5) for better validation loss
     warmup_epochs: int = 0  # Linear LR warm-up for first N epochs, then ReduceLROnPlateau
+    weighted_loss: str = "none"  # none | hard_mining (focus loss on top-k% hardest samples, training only)
+    hard_mining_ratio: float = 0.1  # Top fraction of hardest samples when weighted_loss=hard_mining
     patience: int = 10
     min_delta: float = 0.0001
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -424,7 +426,7 @@ class Trainer:
         return total_loss / len(loader)
     
     def _validate(self, loader: DataLoader) -> float:
-        """Validate model."""
+        """Validate model (always uses mean loss over all samples, no hard mining)."""
         self.model.eval()
         total_loss = 0.0
         
@@ -434,7 +436,7 @@ class Trainer:
                 masks = masks.to(self.config.device)
                 
                 reconstructed, _ = self.model(sequences, masks)
-                loss = self._masked_mse_loss(sequences, reconstructed, masks)
+                loss = self._masked_mse_loss(sequences, reconstructed, masks, use_weighted_loss=False)
                 total_loss += loss.item()
         
         return total_loss / len(loader)
@@ -444,15 +446,31 @@ class Trainer:
         target: torch.Tensor,
         output: torch.Tensor,
         mask: torch.Tensor,
+        use_weighted_loss: Optional[bool] = None,
     ) -> torch.Tensor:
-        """Compute MSE loss with masking for padded positions."""
-        loss = self.criterion(output, target)
+        """Compute MSE loss with masking for padded positions.
         
-        # Apply mask (expand to feature dim)
-        mask = mask.unsqueeze(-1)
-        loss = (loss * mask).sum() / mask.sum()
+        Optionally use hard mining (top-k%% hardest samples per batch) when
+        use_weighted_loss is True or config.weighted_loss == 'hard_mining'.
+        Validation should pass use_weighted_loss=False.
+        """
+        loss = self.criterion(output, target)  # (B, T, F)
+        mask_expanded = mask.unsqueeze(-1)  # (B, T, 1)
+        # Per-sample loss (masked mean over time and features)
+        sample_losses = (loss * mask_expanded).sum(dim=(1, 2)) / (
+            mask_expanded.sum(dim=(1, 2)).clamp(min=1e-8)
+        )  # (B,)
         
-        return loss
+        use_hard_mining = (
+            use_weighted_loss
+            if use_weighted_loss is not None
+            else (self.config.weighted_loss == "hard_mining")
+        )
+        if use_hard_mining and self.config.hard_mining_ratio > 0 and sample_losses.numel() > 0:
+            k = max(1, int(sample_losses.numel() * self.config.hard_mining_ratio))
+            top_k_losses, _ = torch.topk(sample_losses, k)
+            return top_k_losses.mean()
+        return sample_losses.mean()
     
     def _evaluate_test_set(
         self,

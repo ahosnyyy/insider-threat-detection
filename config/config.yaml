@@ -32,6 +32,9 @@ training:
   learning_rate: 5.0e-5  # Better val generalization than 0.0001
   weight_decay: 1.0e-5   # L2 regularization for better validation loss
   warmup_epochs: 5       # Linear LR warm-up (then ReduceLROnPlateau)
+  # Weighted loss (hard mining): focus on top-k% hardest samples per batch (training only)
+  weighted_loss: none    # none | hard_mining
+  hard_mining_ratio: 0.1 # Top 10% hardest samples when weighted_loss: hard_mining
   patience: 50  # Early stopping
   train_split: 0.7
   val_ratio: 0.1
