@@ -199,6 +199,12 @@ class Trainer:
         
         logger.info(f"Starting training on {self.config.device}")
         logger.info(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+        if self.config.weighted_loss == "hard_mining":
+            logger.info(
+                f"Using weighted loss (hard mining): top {self.config.hard_mining_ratio:.0%} hardest samples per batch"
+            )
+        else:
+            logger.info("Using standard loss (no weighted loss)")
         
         best_val_loss = float('inf')
         train_start_time = time.time()
