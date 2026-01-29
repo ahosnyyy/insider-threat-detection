@@ -23,6 +23,7 @@ def _compute_config_hash(
     split_ratios: tuple,
     temporal: bool,
     insider_count: int,
+    include_role: bool = False,
     db_path: Path = Path("data/processed/cert.duckdb")
 ) -> str:
     """Compute a unique hash for the dataset configuration."""
@@ -32,6 +33,7 @@ def _compute_config_hash(
         "split_ratios": split_ratios,
         "temporal": temporal,
         "insider_count": insider_count,
+        "include_role": include_role,  # Include in hash to avoid cache collisions
         # Invalidate if DB modifies
         "db_mtime": db_path.stat().st_mtime if db_path.exists() else 0
     }
@@ -50,6 +52,7 @@ def prepare_training_data(
     insider_incidents: Optional[List[Dict]] = None,
     seed: int = 42,
     use_cache: bool = True,
+    include_role: bool = False,
 ) -> Dict[str, Any]:
     """
     Prepare data for autoencoder training with train/val/test split.
@@ -74,6 +77,7 @@ def prepare_training_data(
         insider_incidents: List of dicts with 'user', 'start', 'end' for session-level labels
         seed: Random seed for reproducibility
         use_cache: If True, load/save to disk cache based on config hash
+        include_role: If True, include role categories as one-hot encoded features (default: False)
         
     Returns:
         Dict with train/val/test sequences, masks, session IDs, labels, and extractor
@@ -90,6 +94,7 @@ def prepare_training_data(
                 split_ratios=(train_ratio, val_ratio, test_ratio),
                 temporal=False,
                 insider_count=len(insider_users or []),
+                include_role=include_role,
             )
             cache_dir = Path("data/processed/cache")
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -178,20 +183,24 @@ def prepare_training_data(
     
     # Get all unique roles from the ENTIRE dataset to ensure consistent dimensions
     # even if some roles only appear in the insider/test set.
-    all_roles = sorted(df["role"].dropna().unique().tolist())
+    all_roles = sorted(df["role"].dropna().unique().tolist()) if include_role else None
     
     # Fit feature extractor on normal user data only (no insider users in training)
-    # But pass all known roles so the one-hot encoding includes them
-    extractor = FeatureExtractor()
-    extractor.fit(normal_user_df, role_categories=all_roles)
+    # Pass all known roles only if include_role=True
+    extractor = FeatureExtractor(include_role=include_role)
+    if include_role and all_roles:
+        extractor.fit(normal_user_df, role_categories=all_roles)
+    else:
+        extractor.fit(normal_user_df)
     
     # Transform normal user data
     normal_features = extractor.transform(normal_user_df)
     
     # Build sequences for normal users
     builder = SequenceBuilder(sequence_length=sequence_length)
+    padding_value = extractor.get_padding_value()
     normal_sequences, normal_masks, normal_session_ids = builder.build_user_sequences(
-        normal_user_df.reset_index(drop=True), normal_features
+        normal_user_df.reset_index(drop=True), normal_features, padding_value=padding_value
     )
     normal_labels_session = np.zeros(len(normal_sequences), dtype=np.int32)
     normal_labels_user = np.zeros(len(normal_sequences), dtype=np.int32)
@@ -314,6 +323,7 @@ def prepare_training_data_temporal(
     insider_users: Optional[List[str]] = None,
     insider_incidents: Optional[List[Dict]] = None,
     use_cache: bool = True,
+    include_role: bool = False,
 ) -> Dict[str, Any]:
     """
     Prepare data with TEMPORAL split (no data leakage).
@@ -324,6 +334,20 @@ def prepare_training_data_temporal(
     - Test: Last 20% of timeline (ALL users including insiders)
     
     This prevents the model from "seeing the future" during training.
+    
+    Args:
+        df: Session features DataFrame
+        sequence_length: Max sequence length
+        train_ratio: Training set ratio (default 0.7)
+        val_ratio: Validation set ratio (default 0.1)
+        test_ratio: Test set ratio (default 0.2)
+        insider_users: List of known insider user IDs
+        insider_incidents: List of dicts with 'user', 'start', 'end' for session-level labels
+        use_cache: If True, load/save to disk cache based on config hash
+        include_role: If True, include role categories as one-hot encoded features (default: False)
+        
+    Returns:
+        Dict with train/val/test sequences, masks, session IDs, labels, and extractor
     """
     # Check cache first
     cache_path = None
@@ -335,6 +359,7 @@ def prepare_training_data_temporal(
                 split_ratios=(train_ratio, val_ratio, test_ratio),
                 temporal=True,
                 insider_count=len(insider_users or []),
+                include_role=include_role,
             )
             cache_dir = Path("data/processed/cache")
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -420,17 +445,21 @@ def prepare_training_data_temporal(
     logger.info(f"Test period: {len(test_df):,} sessions (all users)")
     logger.info(f"  User-level: {(test_df['label_user'] == 1).sum():,} insider, Session-level: {(test_df['label_session'] == 1).sum():,} insider")
     
-    # Get all unique roles from the ENTIRE dataset
-    all_roles = sorted(df["role"].dropna().unique().tolist())
+    # Get all unique roles from the ENTIRE dataset (only if including role)
+    all_roles = sorted(df["role"].dropna().unique().tolist()) if include_role else None
     
-    # Fit extractor on train data only, but with ALL roles
-    extractor = FeatureExtractor()
-    extractor.fit(train_df, role_categories=all_roles)
+    # Fit extractor on train data only, with ALL roles if include_role=True
+    extractor = FeatureExtractor(include_role=include_role)
+    if include_role and all_roles:
+        extractor.fit(train_df, role_categories=all_roles)
+    else:
+        extractor.fit(train_df)
     
     # Build sequences
     builder = SequenceBuilder(sequence_length=sequence_length)
     
     # Transform and build for each split
+    padding_value = extractor.get_padding_value()
     def build_split(split_df, name):
         if len(split_df) == 0:
             return (
@@ -444,7 +473,7 @@ def prepare_training_data_temporal(
             )
         features = extractor.transform(split_df.reset_index(drop=True))
         seqs, masks, sess_ids = builder.build_user_sequences(
-            split_df.reset_index(drop=True), features
+            split_df.reset_index(drop=True), features, padding_value=padding_value
         )
         
         # Map session IDs to both label types and timestamps

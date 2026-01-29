@@ -54,6 +54,8 @@ def main():
                         help="Directory to save model checkpoints")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run with minimal epochs for testing")
+    parser.add_argument("--include-role", action="store_true",
+                        help="Include role categories as one-hot encoded features (default: False)")
     args = parser.parse_args()
     
     setup_logging()
@@ -116,6 +118,7 @@ def main():
             insider_users=insider_users,
             insider_incidents=insider_incidents,
             use_cache=not args.dry_run,
+            include_role=args.include_role,
         )
     else:
         train_data = prepare_training_data(
@@ -128,6 +131,7 @@ def main():
             insider_users=insider_users,
             insider_incidents=insider_incidents,
             use_cache=not args.dry_run,
+            include_role=args.include_role,
         )
     
     print(f"Train sequences: {train_data['train_sequences'].shape}")
