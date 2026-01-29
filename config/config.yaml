@@ -19,7 +19,7 @@ model:
   embedding_dim: 128
   hidden_dim: 256
   num_layers: 2
-  dropout: 0.2  # Matched hardcoded default
+  dropout: 0.4  # Matched hardcoded default
   
   # Transformer-specific
   num_heads: 8
