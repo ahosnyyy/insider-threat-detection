@@ -28,6 +28,8 @@ class TrainConfig:
     batch_size: int = 64
     epochs: int = 50
     learning_rate: float = 0.001
+    weight_decay: float = 0.0  # L2 regularization (e.g. 1e-5) for better validation loss
+    warmup_epochs: int = 0  # Linear LR warm-up for first N epochs, then ReduceLROnPlateau
     patience: int = 10
     min_delta: float = 0.0001
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
