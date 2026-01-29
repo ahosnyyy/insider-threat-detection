@@ -260,6 +260,10 @@ class Trainer:
                     self.history['user_f1_score'].append(metrics_user['f1_score'])
                     self.history['user_fpr'].append(metrics_user['fpr'])
                     self.history['user_auc_roc'].append(metrics_user['auc_roc'])
+                    self.history['user_tp'].append(metrics_user['tp'])
+                    self.history['user_tn'].append(metrics_user['tn'])
+                    self.history['user_fp'].append(metrics_user['fp'])
+                    self.history['user_fn'].append(metrics_user['fn'])
                 
                 # Compute Time-to-Detect metrics (always uses session predictions)
                 ttd_metrics = self._compute_ttd(
@@ -281,7 +285,7 @@ class Trainer:
                 # Log User Metrics
                 if metrics_user:
                     logger.info(f"  User Metrics:    AUC={metrics_user['auc_roc']:.4f}, Acc={metrics_user['accuracy']:.4f}, P={metrics_user['precision']:.4f}, R={metrics_user['recall']:.4f}, F1={metrics_user['f1_score']:.4f}, FPR={metrics_user['fpr']:.4f}")
-                    logger.debug(f"    Confusion: TP={metrics_user['tp']}, FP={metrics_user['fp']}, FN={metrics_user['fn']}, TN={metrics_user['tn']}")
+                    logger.info(f"    User Confusion: TP={metrics_user['tp']}, TN={metrics_user['tn']}, FP={metrics_user['fp']}, FN={metrics_user['fn']}")
 
                 # Log TTD
                 if ttd_metrics.get('n_incidents_detected', 0) > 0:

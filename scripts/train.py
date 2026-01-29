@@ -254,6 +254,13 @@ def main():
         print(f"              Normal  Anomaly")
         print(f"  Actual Normal  {history['tn'][-1]:>6}   {history['fp'][-1]:>6}")
         print(f"        Anomaly  {history['fn'][-1]:>6}   {history['tp'][-1]:>6}")
+
+        if history.get('user_f1_score') and len(history.get('user_tp', [])) > 0:
+            print(f"\nConfusion Matrix (User):")
+            print(f"                Predicted")
+            print(f"              Normal  Anomaly")
+            print(f"  Actual Normal  {history['user_tn'][-1]:>6}   {history['user_fp'][-1]:>6}")
+            print(f"        Anomaly  {history['user_fn'][-1]:>6}   {history['user_tp'][-1]:>6}")
     
     print(f"\nModel saved to: {args.output_dir / f'{args.model}_autoencoder_best.pt'}")
     
