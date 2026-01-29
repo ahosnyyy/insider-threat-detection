@@ -23,8 +23,9 @@ def main():
     
     # Cast booleans if needed (though we fixed this in features.py, good to verify)
     # The fix in features.py handles the casting inside fit()
+    # Use include_role=True so we report role categories (default is False for training).
     
-    extractor = FeatureExtractor()
+    extractor = FeatureExtractor(include_role=True)
     extractor.fit(df)
 
     print("-" * 50)
