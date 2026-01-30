@@ -111,6 +111,7 @@ class Trainer:
         
         self.history = {
             'train_loss': [],
+            'train_loss_mean_all': [],  # Mean over all samples (comparable to val) when hard mining
             'val_loss': [],
             'epoch_time': [],
             # Session-level classification metrics
@@ -212,8 +213,8 @@ class Trainer:
         for epoch in range(self.config.epochs):
             start_time = time.time()
             
-            # Train epoch
-            train_loss = self._train_epoch(train_loader)
+            # Train epoch (returns train_loss, and train_loss_mean_all when hard mining)
+            train_loss, train_loss_mean_all = self._train_epoch(train_loader)
             
             # Validation
             val_loss = self._validate(val_loader)
@@ -222,6 +223,8 @@ class Trainer:
             
             # Update history
             self.history['train_loss'].append(train_loss)
+            if train_loss_mean_all is not None:
+                self.history['train_loss_mean_all'].append(train_loss_mean_all)
             self.history['val_loss'].append(val_loss)
             self.history['epoch_time'].append(epoch_time)
             
@@ -395,25 +398,39 @@ class Trainer:
         
         return self.history
     
-    def _train_epoch(self, loader: DataLoader) -> float:
-        """Train one epoch."""
+    def _train_epoch(self, loader: DataLoader) -> Tuple[float, Optional[float]]:
+        """Train one epoch.
+        
+        Returns:
+            train_loss: Loss used for backward (mean of top-k%% hardest when hard mining, else mean over all).
+            train_loss_mean_all: When hard mining, mean-over-all loss (comparable to val); else None.
+        """
         self.model.train()
         total_loss = 0.0
+        total_loss_mean_all = 0.0
+        use_hard_mining = self.config.weighted_loss == "hard_mining"
         
         for i, (sequences, masks) in enumerate(tqdm(loader, desc="Training", leave=False)):
             sequences = sequences.to(self.config.device)
             masks = masks.to(self.config.device)
             
             # Forward
-            # Model returns (reconstructed, embedding)
             output = self.model(sequences, masks)
             if isinstance(output, tuple):
                 reconstructed, _ = output
             else:
                 reconstructed = output
             
-            # Masked MSE loss
+            # Loss for backward (hard mining or mean over all)
             loss = self._masked_mse_loss(sequences, reconstructed, masks)
+            
+            # When hard mining: also compute mean-over-all loss for logging (no extra forward)
+            if use_hard_mining:
+                with torch.no_grad():
+                    loss_mean_all = self._masked_mse_loss(
+                        sequences, reconstructed, masks, use_weighted_loss=False
+                    )
+                total_loss_mean_all += loss_mean_all.item()
             
             # Scale loss for gradient accumulation
             loss = loss / self.config.accumulation_steps
@@ -429,7 +446,9 @@ class Trainer:
             
             total_loss += loss.item() * self.config.accumulation_steps
         
-        return total_loss / len(loader)
+        train_loss = total_loss / len(loader)
+        train_loss_mean_all = (total_loss_mean_all / len(loader)) if use_hard_mining else None
+        return (train_loss, train_loss_mean_all)
     
     def _validate(self, loader: DataLoader) -> float:
         """Validate model (always uses mean loss over all samples, no hard mining)."""

@@ -35,7 +35,7 @@ training:
   # Weighted loss (hard mining): focus on top-k% hardest samples per batch (training only)
   weighted_loss: none    # none | hard_mining
   hard_mining_ratio: 0.1 # Top 10% hardest samples when weighted_loss: hard_mining
-  patience: 50  # Early stopping
+  patience: 200  # Early stopping
   train_split: 0.7
   val_ratio: 0.1
   test_ratio: 0.2
