@@ -260,6 +260,8 @@ def main():
                         help="Output path for evaluation report")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Device to use for evaluation")
+    parser.add_argument("--oversample", action="store_true",
+                        help="Use same oversampled test set as training (config: oversample_target_positive_rate)")
     args = parser.parse_args()
     
     setup_logging()
