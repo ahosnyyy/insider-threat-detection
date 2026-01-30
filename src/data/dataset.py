@@ -25,7 +25,8 @@ def _compute_config_hash(
     insider_count: int,
     role_features: str = "none",
     role_mapping_file: Optional[Union[str, Path]] = None,
-    db_path: Path = Path("data/processed/cert.duckdb")
+    db_path: Path = Path("data/processed/cert.duckdb"),
+    split_by_total: bool = True,
 ) -> str:
     """Compute a unique hash for the dataset configuration."""
     mapping_mtime = 0
@@ -41,7 +42,8 @@ def _compute_config_hash(
         "insider_count": insider_count,
         "role_features": role_features,
         "role_mapping_mtime": mapping_mtime,
-        "db_mtime": db_path.stat().st_mtime if db_path.exists() else 0
+        "db_mtime": db_path.stat().st_mtime if db_path.exists() else 0,
+        "split_by_total": split_by_total,
     }
     config_str = json.dumps(config, sort_keys=True)
     return hashlib.md5(config_str.encode()).hexdigest()
@@ -63,10 +65,10 @@ def prepare_training_data(
     """
     Prepare data for autoencoder training with train/val/test split.
     
-    Split strategy (per paper):
-    - Train (70%): Normal users only - learns normal behavior
-    - Val (10%): Normal users only - early stopping based on reconstruction loss
-    - Test (20%): ALL users including insiders - for precision/recall/F1 evaluation
+    Split strategy (70/10/20 of TOTAL data size; train/val normal-only):
+    - Train: 70% of (normal + insider) in size, all normal
+    - Val: 10% of total in size, all normal
+    - Test: remaining 20% = remaining normal + ALL insider sessions
     
     Session-level labels:
     - Uses incident time ranges to label ONLY sessions during malicious activity
@@ -219,15 +221,7 @@ def prepare_training_data(
     
     logger.info(f"Built {len(normal_sequences):,} normal user sequences")
     
-    # Split normal user data into train/val/test_normal
     n_normal = len(normal_sequences)
-    n_train = int(n_normal * train_ratio)
-    n_val = int(n_normal * val_ratio)
-    
-    indices = np.random.permutation(n_normal)
-    train_idx = indices[:n_train]
-    val_idx = indices[n_train:n_train + n_val]
-    test_normal_idx = indices[n_train + n_val:]
     
     # Build sequences for ALL insider user sessions (for test set)
     if len(insider_user_df) > 0:
@@ -252,6 +246,31 @@ def prepare_training_data(
         insider_session_ids = []
         insider_labels_session = np.array([], dtype=np.int32)
         insider_labels_user = np.array([], dtype=np.int32)
+    
+    # Split: 70/10/20 of TOTAL data (normal + insider). Train and val are normal-only; test = remaining normal + all insiders.
+    n_insider = len(insider_sequences)
+    total = n_normal + n_insider
+    n_train_target = int(total * train_ratio)
+    n_val_target = int(total * val_ratio)
+    n_test_target = total - n_train_target - n_val_target
+    
+    if n_normal < n_train_target + n_val_target:
+        logger.warning(
+            f"Not enough normal sequences for 70/10/20 of total: need {n_train_target + n_val_target:,} normal, have {n_normal:,}. "
+            "Using all normal for train/val; test = all insiders only."
+        )
+        n_val = min(n_val_target, n_normal)
+        n_train = n_normal - n_val
+    else:
+        n_train = n_train_target
+        n_val = n_val_target
+    
+    indices = np.random.permutation(n_normal)
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:n_train + n_val]
+    test_normal_idx = indices[n_train + n_val:]
+    
+    logger.info(f"Split (70/10/20 of total={total:,}): train={n_train:,} (normal), val={n_val:,} (normal), test_normal={len(test_normal_idx):,} + insiders={n_insider:,} = {len(test_normal_idx) + n_insider:,}")
     
     # Combine test set: normal user test portion + ALL insider user sessions
     test_sequences = np.concatenate([normal_sequences[test_normal_idx], insider_sequences])
