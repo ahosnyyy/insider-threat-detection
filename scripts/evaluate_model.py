@@ -294,11 +294,16 @@ def main():
     
     # Prepare data with dual-level labels
     print("\nPreparing evaluation data with dual-level labels...")
+    role_mapping_file = args.role_mapping_file
+    if role_mapping_file and not role_mapping_file.is_absolute():
+        role_mapping_file = Path(__file__).parent.parent / role_mapping_file
     eval_data = prepare_training_data(
         df,
-        sequence_length=100,
+        sequence_length=cfg["features"]["sequence_length"],
         insider_users=insider_users,
         insider_incidents=insider_incidents,
+        role_features=args.role_features,
+        role_mapping_file=role_mapping_file if args.role_features == "units" else None,
         oversample=args.oversample,
         oversample_target_positive_rate=float(cfg['data'].get('oversample_target_positive_rate', 0.1)),
     )
