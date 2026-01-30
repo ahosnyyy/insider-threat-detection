@@ -15,12 +15,16 @@ features:
 
 # Model architecture
 model:
-  type: lstm  # lstm or transformer
+  type: lstm  # lstm | paper_lstm | transformer
   embedding_dim: 128
   hidden_dim: 256
   num_layers: 2
   dropout: 0.4  # Matched hardcoded default
-  
+
+  # Paper LSTM (matches reference paper: unidirectional, RepeatVector, 32->16->32)
+  paper_lstm_bottleneck: 16
+  paper_lstm_enc_hidden: 32   # First encoder hidden (paper uses 32); omit to use feature_dim
+
   # Transformer-specific
   num_heads: 8
   ff_dim: 512   # Matched hardcoded default

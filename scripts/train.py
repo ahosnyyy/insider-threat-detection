@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from src.data import get_session_dataframe, prepare_training_data, prepare_training_data_temporal
-from src.models import LSTMAutoencoder, TransformerAutoencoder
+from src.models import LSTMAutoencoder, PaperLSTMAutoencoder, TransformerAutoencoder
 from src.training import Trainer, TrainConfig
 from src.utils import load_config, setup_logging, load_ground_truth, save_json
 
@@ -32,7 +32,7 @@ def main():
     cfg = load_config()
 
     parser = argparse.ArgumentParser(description="Train autoencoder model")
-    parser.add_argument("--model", choices=["lstm", "transformer"], default=cfg['model']['type'],
+    parser.add_argument("--model", choices=["lstm", "paper_lstm", "transformer"], default=cfg['model']['type'],
                         help="Model type to train")
     parser.add_argument("--epochs", type=int, default=cfg['training']['epochs'],
                         help="Number of training epochs")
@@ -182,6 +182,13 @@ def main():
             embedding_dim=cfg['model']['embedding_dim'],
             num_layers=cfg['model']['num_layers'],
             dropout=cfg['model']['dropout'],
+        )
+    elif args.model == "paper_lstm":
+        model = PaperLSTMAutoencoder(
+            input_dim=feature_dim,
+            bottleneck_dim=cfg['model'].get('paper_lstm_bottleneck', 16),
+            enc_hidden=cfg['model'].get('paper_lstm_enc_hidden'),
+            dropout=cfg['model'].get('dropout', 0.0),
         )
     else:
         model = TransformerAutoencoder(
