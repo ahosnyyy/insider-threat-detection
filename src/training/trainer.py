@@ -238,18 +238,25 @@ class Trainer:
             
             # Logging
             current_lr = self.optimizer.param_groups[0]['lr']
-            logger.info(
-                f"Epoch {epoch+1}/{self.config.epochs} - "
-                f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
-                f"Time: {epoch_time:.1f}s, LR: {current_lr:.6f}"
-            )
+            if train_loss_mean_all is not None:
+                logger.info(
+                    f"Epoch {epoch+1}/{self.config.epochs} - "
+                    f"Train Loss (optim): {train_loss:.6f}, Train Loss (mean over all, comparable to val): {train_loss_mean_all:.6f}, "
+                    f"Val Loss: {val_loss:.6f}, Time: {epoch_time:.1f}s, LR: {current_lr:.6f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch+1}/{self.config.epochs} - "
+                    f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
+                    f"Time: {epoch_time:.1f}s, LR: {current_lr:.6f}"
+                )
             
             # TensorBoard logging
             if self.writer:
-                self.writer.add_scalars('Loss', {
-                    'train': train_loss,
-                    'validation': val_loss,
-                }, epoch)
+                scalars_loss = {'train': train_loss, 'validation': val_loss}
+                if train_loss_mean_all is not None:
+                    scalars_loss['train_mean_all'] = train_loss_mean_all
+                self.writer.add_scalars('Loss', scalars_loss, epoch)
                 self.writer.add_scalar('Learning_Rate', current_lr, epoch)
                 self.writer.add_scalar('Epoch_Time', epoch_time, epoch)
             
