@@ -142,11 +142,27 @@ def visualize_timeline(session_id: str, db_path: Path, output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize session timeline")
-    parser.add_argument("--session-id", type=str, required=True, help="Session ID")
+    parser.add_argument("--session-id", type=str, default=None,
+                        help="Session ID (default: pick a random session from DB)")
     parser.add_argument("--db-path", type=Path, default=Path("data/processed/cert.duckdb"))
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     args = parser.parse_args()
-    
+
+    if args.session_id is None:
+        if not args.db_path.exists():
+            logger.error(f"Database not found: {args.db_path}")
+            return 1
+        con = duckdb.connect(str(args.db_path))
+        row = con.execute(
+            "SELECT session_id FROM sessions ORDER BY RANDOM() LIMIT 1"
+        ).fetchone()
+        con.close()
+        if not row:
+            logger.error("No sessions found in database.")
+            return 1
+        args.session_id = str(row[0])
+        logger.info(f"No --session-id provided; using random session: {args.session_id}")
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     result = visualize_timeline(args.session_id, args.db_path, args.output_dir)
     return result if result is not None else 0
