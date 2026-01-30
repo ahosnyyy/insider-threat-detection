@@ -262,6 +262,13 @@ def main():
                         help="Device to use for evaluation")
     parser.add_argument("--oversample", action="store_true",
                         help="Use same oversampled test set as training (config: oversample_target_positive_rate)")
+    parser.add_argument("--role-features", type=str,
+                        choices=["none", "roles", "units"],
+                        default=cfg["features"].get("role_features", "none"),
+                        help="Role features: none | roles | units (must match training)")
+    parser.add_argument("--role-mapping-file", type=Path,
+                        default=Path(cfg["features"].get("role_mapping_file", "config/role_units.yaml")),
+                        help="Path to role_units.yaml (used when --role-features units)")
     args = parser.parse_args()
     
     setup_logging()
