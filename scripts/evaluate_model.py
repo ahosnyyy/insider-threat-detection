@@ -278,6 +278,9 @@ def main():
         print(f"Error: Database not found: {args.db_path}")
         return 1
     
+    # Ensure output directory exists (for report, embeddings, labels, plots)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    
     print("=" * 60)
     print("Model Evaluation (Dual-Level)")
     print("=" * 60)
