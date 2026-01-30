@@ -297,6 +297,8 @@ def main():
         sequence_length=100,
         insider_users=insider_users,
         insider_incidents=insider_incidents,
+        oversample=args.oversample,
+        oversample_target_positive_rate=float(cfg['data'].get('oversample_target_positive_rate', 0.1)),
     )
     
     # Get test set with dual labels

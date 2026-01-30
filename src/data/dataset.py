@@ -27,6 +27,8 @@ def _compute_config_hash(
     role_mapping_file: Optional[Union[str, Path]] = None,
     db_path: Path = Path("data/processed/cert.duckdb"),
     split_by_total: bool = True,
+    oversample: bool = False,
+    oversample_target_positive_rate: float = 0.1,
 ) -> str:
     """Compute a unique hash for the dataset configuration."""
     mapping_mtime = 0
@@ -44,6 +46,8 @@ def _compute_config_hash(
         "role_mapping_mtime": mapping_mtime,
         "db_mtime": db_path.stat().st_mtime if db_path.exists() else 0,
         "split_by_total": split_by_total,
+        "oversample": oversample,
+        "oversample_target_positive_rate": oversample_target_positive_rate,
     }
     config_str = json.dumps(config, sort_keys=True)
     return hashlib.md5(config_str.encode()).hexdigest()
@@ -61,6 +65,8 @@ def prepare_training_data(
     use_cache: bool = True,
     role_features: str = "none",
     role_mapping_file: Optional[Union[str, Path]] = None,
+    oversample: bool = False,
+    oversample_target_positive_rate: float = 0.1,
 ) -> Dict[str, Any]:
     """
     Prepare data for autoencoder training with train/val/test split.
@@ -103,6 +109,8 @@ def prepare_training_data(
                 insider_count=len(insider_users or []),
                 role_features=role_features,
                 role_mapping_file=role_mapping_file,
+                oversample=oversample,
+                oversample_target_positive_rate=oversample_target_positive_rate,
             )
             cache_dir = Path("data/processed/cache")
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -299,7 +307,47 @@ def prepare_training_data(
     logger.info(f"Train: {len(train_idx):,}, Val: {len(val_idx):,}, Test: {len(test_sequences):,}")
     logger.info(f"Test set (session-level): {(test_labels == 0).sum():,} normal, {(test_labels == 1).sum():,} insider")
     logger.info(f"Test set (user-level): {(test_labels_user == 0).sum():,} normal, {(test_labels_user == 1).sum():,} insider")
-    
+
+    # Optional: oversample session-level insider sessions in test to reach target positive rate (diffuse by shuffling)
+    if oversample and 0 < oversample_target_positive_rate < 1:
+        n_test_normal = int((test_labels == 0).sum())
+        n_insider_session = int((test_labels == 1).sum())
+        if n_insider_session > 0:
+            target_insiders = oversample_target_positive_rate * n_test_normal / (1 - oversample_target_positive_rate)
+            K = max(1, int(np.ceil(target_insiders / n_insider_session)))
+            insider_mask = test_labels == 1
+            # Duplicate session-level insider rows (K-1) more times
+            seq_ins = test_sequences[insider_mask]  # (n_insider_session, ...)
+            mask_ins = test_masks[insider_mask]
+            lab_ins = test_labels[insider_mask]
+            lab_user_ins = test_labels_user[insider_mask]
+            sid_ins = [test_session_ids[i] for i in np.where(insider_mask)[0]]
+            ts_ins = [test_timestamps[i] for i in np.where(insider_mask)[0]]
+            uid_ins = [test_user_ids[i] for i in np.where(insider_mask)[0]]
+            # Repeat (K-1) times and append
+            for _ in range(K - 1):
+                test_sequences = np.concatenate([test_sequences, seq_ins])
+                test_masks = np.concatenate([test_masks, mask_ins])
+                test_labels = np.concatenate([test_labels, lab_ins])
+                test_labels_user = np.concatenate([test_labels_user, lab_user_ins])
+                test_session_ids = test_session_ids + sid_ins
+                test_timestamps = test_timestamps + ts_ins
+                test_user_ids = test_user_ids + uid_ins
+            # Shuffle test set (diffuse)
+            perm = np.random.permutation(len(test_sequences))
+            test_sequences = test_sequences[perm]
+            test_masks = test_masks[perm]
+            test_labels = test_labels[perm]
+            test_labels_user = test_labels_user[perm]
+            test_session_ids = [test_session_ids[i] for i in perm]
+            test_timestamps = [test_timestamps[i] for i in perm]
+            test_user_ids = [test_user_ids[i] for i in perm]
+            logger.info(f"Oversampled session-level insiders in test: {n_insider_session:,} -> {n_insider_session * K:,} (target rate={oversample_target_positive_rate:.2%}), test size={len(test_sequences):,}, shuffled (diffused)")
+        else:
+            logger.warning("Oversample requested but no session-level insider sessions in test; skipping")
+    elif oversample:
+        logger.warning("Oversample requested but oversample_target_positive_rate must be in (0,1); skipping")
+
     result = {
         # Training data (normal only)
         "train_sequences": normal_sequences[train_idx],

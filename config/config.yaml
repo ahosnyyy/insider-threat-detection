@@ -4,6 +4,8 @@ data:
   processed_path: data/processed
   output_path: data/outputs
   database: data/processed/cert.duckdb
+  # Oversample session-level insider sessions in test to reach target positive rate (use with --oversample)
+  oversample_target_positive_rate: 0.1  # e.g. 0.1 = 10% insider sessions in test after oversample
 
 # Feature engineering
 features:
