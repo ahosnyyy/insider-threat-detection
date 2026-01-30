@@ -68,6 +68,8 @@ def main():
     parser.add_argument("--hard-mining-ratio", type=float,
                         default=cfg["training"].get("hard_mining_ratio", 0.1),
                         help="Fraction of hardest samples when --weighted-loss (default: 0.1)")
+    parser.add_argument("--oversample", action="store_true",
+                        help="Oversample insider sessions in test set to target positive rate (config: oversample_target_positive_rate)")
     args = parser.parse_args()
     
     # Alias: --include-role => --role-features roles
