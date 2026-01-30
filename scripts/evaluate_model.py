@@ -28,8 +28,12 @@ from sklearn.metrics import (
     roc_curve, average_precision_score
 )
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 from src.data import get_session_dataframe, prepare_training_data
-from src.models import LSTMAutoencoder, TransformerAutoencoder
+from src.models import LSTMAutoencoder, PaperLSTMAutoencoder, TransformerAutoencoder
 from src.training import ModelEvaluator
 from src.training.metrics import compute_ttd
 from src.utils import setup_logging, load_ground_truth, save_json, load_json, load_config
@@ -44,6 +48,13 @@ def load_model(model_path: Path, model_type: str, feature_dim: int, cfg: dict):
             embedding_dim=cfg['model']['embedding_dim'],
             num_layers=cfg['model']['num_layers'],
             dropout=cfg['model']['dropout'],
+        )
+    elif model_type == "paper_lstm":
+        model = PaperLSTMAutoencoder(
+            input_dim=feature_dim,
+            bottleneck_dim=cfg['model'].get('paper_lstm_bottleneck', 16),
+            enc_hidden=cfg['model'].get('paper_lstm_enc_hidden'),
+            dropout=cfg['model'].get('dropout', 0.0),
         )
     else:
         model = TransformerAutoencoder(
@@ -100,14 +111,35 @@ def compute_reconstruction_errors(model, sequences, masks, device="cuda"):
     return np.array(errors), embeddings
 
 
-def compute_metrics(errors, labels, threshold_percentile=95):
-    """Compute classification metrics at given threshold."""
-    threshold = np.percentile(errors, threshold_percentile)
+def compute_metrics(errors, labels, threshold_percentile=95, threshold_method: str = "percentile"):
+    """Compute classification metrics at a chosen threshold.
+    
+    threshold_method:
+      - 'percentile': use fixed percentile of error distribution
+      - 'f1_optimal': choose threshold that maximizes F1 on this set
+    """
+    if threshold_method == "f1_optimal":
+        try:
+            precision_arr, recall_arr, pr_thresholds = precision_recall_curve(labels, errors)
+            # Last precision/recall entry corresponds to +inf threshold; ignore it for F1
+            if pr_thresholds.size > 0:
+                f1_scores = 2 * (precision_arr[:-1] * recall_arr[:-1]) / (
+                    precision_arr[:-1] + recall_arr[:-1] + 1e-8
+                )
+                best_idx = int(np.argmax(f1_scores))
+                threshold = pr_thresholds[best_idx]
+            else:
+                threshold = np.percentile(errors, threshold_percentile)
+        except Exception:
+            threshold = np.percentile(errors, threshold_percentile)
+    else:
+        threshold = np.percentile(errors, threshold_percentile)
     predictions = (errors > threshold).astype(int)
     
     metrics = {
         'threshold': float(threshold),
         'threshold_percentile': threshold_percentile,
+        'threshold_method': threshold_method,
         'accuracy': float(accuracy_score(labels, predictions)),
         'precision': float(precision_score(labels, predictions, zero_division=0)),
         'recall': float(recall_score(labels, predictions, zero_division=0)),
@@ -212,8 +244,12 @@ def main():
     cfg = load_config()
 
     parser = argparse.ArgumentParser(description="Evaluate trained model with dual-level metrics")
-    parser.add_argument("--model", choices=["lstm", "transformer", "both"], default="both",
-                        help="Model(s) to evaluate")
+    parser.add_argument(
+        "--model",
+        choices=["lstm", "transformer", "paper_lstm", "both"],
+        default="both",
+        help="Model(s) to evaluate",
+    )
     parser.add_argument("--db-path", type=Path, default=Path(cfg['data']['database']),
                         help="Path to DuckDB database")
     parser.add_argument("--models-dir", type=Path, default=Path("models"),
@@ -281,6 +317,8 @@ def main():
         models_to_eval.append("lstm")
     if args.model in ["transformer", "both"]:
         models_to_eval.append("transformer")
+    if args.model == "paper_lstm":
+        models_to_eval.append("paper_lstm")
     
     results = {}
     
@@ -312,12 +350,23 @@ def main():
         
         # Compute metrics at session-level
         print("\nSession-Level Metrics (detecting specific malicious sessions):")
-        session_metrics = compute_metrics(errors, test_labels_session, threshold_percentile=cfg['evaluation']['percentile'])
+        session_metrics = compute_metrics(
+            errors,
+            test_labels_session,
+            threshold_percentile=cfg['evaluation']['percentile'],
+            threshold_method=cfg['evaluation'].get('threshold_method', 'percentile'),
+        )
         print(f"  AUC-ROC:   {session_metrics['auc_roc']:.4f}")
         print(f"  Precision: {session_metrics['precision']:.4f}")
         print(f"  Recall:    {session_metrics['recall']:.4f}")
         print(f"  F1 Score:  {session_metrics['f1_score']:.4f}")
         print(f"  TP: {session_metrics['tp']}, FP: {session_metrics['fp']}, FN: {session_metrics['fn']}, TN: {session_metrics['tn']}")
+        print(
+            f"  Threshold method: {session_metrics.get('threshold_method', 'percentile')} "
+            f"(p={session_metrics.get('threshold_percentile', 0):.1f})"
+        )
+        print(f"  Threshold value:  {session_metrics['threshold']:.6f}")
+        print(f"  FPR at threshold: {session_metrics['fpr']:.4f}")
         
         # Compute Precision@K for Session
         print("\n  Precision@K (Session):")
@@ -363,12 +412,23 @@ def main():
         
         # Compute metrics at user-level
         print("\nUser-Level Metrics (identifying insider users):")
-        user_metrics = compute_metrics(errors, test_labels_user, threshold_percentile=cfg['evaluation']['percentile'])
+        user_metrics = compute_metrics(
+            errors,
+            test_labels_user,
+            threshold_percentile=cfg['evaluation']['percentile'],
+            threshold_method=cfg['evaluation'].get('threshold_method', 'percentile'),
+        )
         print(f"  AUC-ROC:   {user_metrics['auc_roc']:.4f}")
         print(f"  Precision: {user_metrics['precision']:.4f}")
         print(f"  Recall:    {user_metrics['recall']:.4f}")
         print(f"  F1 Score:  {user_metrics['f1_score']:.4f}")
         print(f"  TP: {user_metrics['tp']}, FP: {user_metrics['fp']}, FN: {user_metrics['fn']}, TN: {user_metrics['tn']}")
+        print(
+            f"  Threshold method: {user_metrics.get('threshold_method', 'percentile')} "
+            f"(p={user_metrics.get('threshold_percentile', 0):.1f})"
+        )
+        print(f"  Threshold value:  {user_metrics['threshold']:.6f}")
+        print(f"  FPR at threshold: {user_metrics['fpr']:.4f}")
 
         # Compute Precision@K for User
         print("\n  Precision@K (User):")
@@ -455,18 +515,88 @@ def main():
         csv_path = export_dir / f"session_details_{model_type}.csv"
         
         if '_errors' in model_results:
+            errors = model_results['_errors']
             export_session_details(
                 output_path=csv_path,
                 session_ids=eval_data['test_session_ids'],
                 user_ids=eval_data['test_user_ids'],
                 timestamps=eval_data['test_timestamps'],
-                errors=model_results['_errors'],
+                errors=errors,
                 labels_session=test_labels_session,
                 labels_user=test_labels_user,
                 threshold=model_results['_threshold'],
             )
             print(f"  Session details: {csv_path}")
-            
+
+            # Session-level ROC and PR curves
+            try:
+                fpr, tpr, _ = roc_curve(test_labels_session, errors)
+                precision_arr, recall_arr, _ = precision_recall_curve(test_labels_session, errors)
+
+                # ROC curve (Session)
+                plt.figure()
+                plt.plot(fpr, tpr, label=f"{model_type} (AUC={model_results['session_level']['auc_roc']:.3f})")
+                plt.plot([0, 1], [0, 1], "k--", label="Random")
+                plt.xlabel("False Positive Rate")
+                plt.ylabel("True Positive Rate")
+                plt.title("ROC Curve (Session)")
+                plt.legend()
+                plt.tight_layout()
+                roc_path = export_dir / f"roc_session_{model_type}.png"
+                plt.savefig(roc_path)
+                plt.close()
+                print(f"  ROC curve (session): {roc_path}")
+
+                # PR curve (Session)
+                plt.figure()
+                plt.plot(recall_arr, precision_arr, label=model_type)
+                plt.xlabel("Recall")
+                plt.ylabel("Precision")
+                plt.title("Precision-Recall Curve (Session)")
+                plt.tight_layout()
+                pr_path = export_dir / f"pr_session_{model_type}.png"
+                plt.savefig(pr_path)
+                plt.close()
+                print(f"  PR curve (session):  {pr_path}")
+
+                # Reconstruction error distribution (Session) - histogram
+                normal_errors = errors[test_labels_session == 0]
+                insider_errors = errors[test_labels_session == 1]
+                plt.figure()
+                bins = 50
+                plt.hist(normal_errors, bins=bins, alpha=0.5, label="Normal", density=True)
+                plt.hist(insider_errors, bins=bins, alpha=0.5, label="Insider", density=True)
+                plt.yscale("log")
+                plt.xlabel("Reconstruction error")
+                plt.ylabel("Density (log scale)")
+                plt.title("Reconstruction Error Distribution (Session)")
+                plt.legend()
+                plt.tight_layout()
+                hist_path = export_dir / f"error_hist_session_{model_type}.png"
+                plt.savefig(hist_path)
+                plt.close()
+                print(f"  Error histogram:      {hist_path}")
+
+                # Reconstruction error scatter plot with threshold line
+                plt.figure(figsize=(10, 4))
+                indices = np.arange(len(errors))
+                normal_idx = np.where(test_labels_session == 0)[0]
+                insider_idx = np.where(test_labels_session == 1)[0]
+                plt.scatter(indices[normal_idx], errors[normal_idx], s=1, alpha=0.3, label="Normal")
+                plt.scatter(indices[insider_idx], errors[insider_idx], s=4, alpha=0.6, label="Insider")
+                plt.axhline(model_results['_threshold'], color="red", linestyle="--", label="Threshold")
+                plt.xlabel("Sample index (test set order)")
+                plt.ylabel("Reconstruction error")
+                plt.title("Reconstruction Error (per sample) with Threshold (Session)")
+                plt.legend(loc="upper right")
+                plt.tight_layout()
+                scatter_path = export_dir / f"error_scatter_session_{model_type}.png"
+                plt.savefig(scatter_path)
+                plt.close()
+                print(f"  Error scatter plot:   {scatter_path}")
+            except Exception as e:
+                print(f"  Warning: Failed to generate curves/histogram: {e}")
+
             # Remove temp keys from results before JSON export
             del model_results['_errors']
             del model_results['_threshold']
