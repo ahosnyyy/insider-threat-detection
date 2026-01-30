@@ -404,6 +404,8 @@ def prepare_training_data_temporal(
     use_cache: bool = True,
     role_features: str = "none",
     role_mapping_file: Optional[Union[str, Path]] = None,
+    oversample: bool = False,
+    oversample_target_positive_rate: float = 0.1,
 ) -> Dict[str, Any]:
     """
     Prepare data with TEMPORAL split (no data leakage).
@@ -442,6 +444,8 @@ def prepare_training_data_temporal(
                 insider_count=len(insider_users or []),
                 role_features=role_features,
                 role_mapping_file=role_mapping_file,
+                oversample=oversample,
+                oversample_target_positive_rate=oversample_target_positive_rate,
             )
             cache_dir = Path("data/processed/cache")
             cache_dir.mkdir(parents=True, exist_ok=True)

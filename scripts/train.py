@@ -147,6 +147,8 @@ def main():
             use_cache=not args.dry_run,
             role_features=args.role_features,
             role_mapping_file=role_mapping_file if args.role_features == "units" else None,
+            oversample=args.oversample,
+            oversample_target_positive_rate=float(cfg['data'].get('oversample_target_positive_rate', 0.1)),
         )
     else:
         train_data = prepare_training_data(
