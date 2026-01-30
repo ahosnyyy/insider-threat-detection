@@ -112,6 +112,8 @@ class Trainer:
         self.history = {
             'train_loss': [],
             'train_loss_mean_all': [],  # Mean over all samples (comparable to val) when hard mining
+            'train_mse_paper': [],   # Paper-style MSE: total sum sq / total count (train)
+            'val_mse_paper': [],     # Paper-style MSE: total sum sq / total count (val)
             'val_loss': [],
             'epoch_time': [],
             # Session-level classification metrics
@@ -213,11 +215,11 @@ class Trainer:
         for epoch in range(self.config.epochs):
             start_time = time.time()
             
-            # Train epoch (returns train_loss, and train_loss_mean_all when hard mining)
-            train_loss, train_loss_mean_all = self._train_epoch(train_loader)
+            # Train epoch (returns train_loss, train_loss_mean_all when hard mining, train_mse_paper)
+            train_loss, train_loss_mean_all, train_mse_paper = self._train_epoch(train_loader)
             
-            # Validation
-            val_loss = self._validate(val_loader)
+            # Validation (returns val_loss, val_mse_paper)
+            val_loss, val_mse_paper = self._validate(val_loader)
             
             epoch_time = time.time() - start_time
             
@@ -225,7 +227,9 @@ class Trainer:
             self.history['train_loss'].append(train_loss)
             if train_loss_mean_all is not None:
                 self.history['train_loss_mean_all'].append(train_loss_mean_all)
+            self.history['train_mse_paper'].append(train_mse_paper)
             self.history['val_loss'].append(val_loss)
+            self.history['val_mse_paper'].append(val_mse_paper)
             self.history['epoch_time'].append(epoch_time)
             
             # Learning rate: warm-up then ReduceLROnPlateau
@@ -250,6 +254,9 @@ class Trainer:
                     f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
                     f"Time: {epoch_time:.1f}s, LR: {current_lr:.6f}"
                 )
+            logger.info(
+                f"  MSE (paper, total_sq/total_count): Train={train_mse_paper:.6f}, Val={val_mse_paper:.6f}"
+            )
             
             # TensorBoard logging
             if self.writer:
@@ -257,6 +264,10 @@ class Trainer:
                 if train_loss_mean_all is not None:
                     scalars_loss['train_mean_all'] = train_loss_mean_all
                 self.writer.add_scalars('Loss', scalars_loss, epoch)
+                self.writer.add_scalars('MSE_Paper', {
+                    'train': train_mse_paper,
+                    'validation': val_mse_paper,
+                }, epoch)
                 self.writer.add_scalar('Learning_Rate', current_lr, epoch)
                 self.writer.add_scalar('Epoch_Time', epoch_time, epoch)
             
@@ -405,16 +416,19 @@ class Trainer:
         
         return self.history
     
-    def _train_epoch(self, loader: DataLoader) -> Tuple[float, Optional[float]]:
+    def _train_epoch(self, loader: DataLoader) -> Tuple[float, Optional[float], float]:
         """Train one epoch.
         
         Returns:
             train_loss: Loss used for backward (mean of top-k%% hardest when hard mining, else mean over all).
             train_loss_mean_all: When hard mining, mean-over-all loss (comparable to val); else None.
+            train_mse_paper: Paper-style MSE (total sum sq / total count over epoch), for logging only.
         """
         self.model.train()
         total_loss = 0.0
         total_loss_mean_all = 0.0
+        total_sum_sq = 0.0
+        total_count = 0
         use_hard_mining = self.config.weighted_loss == "hard_mining"
         
         for i, (sequences, masks) in enumerate(tqdm(loader, desc="Training", leave=False)):
@@ -431,7 +445,16 @@ class Trainer:
             # Loss for backward (hard mining or mean over all)
             loss = self._masked_mse_loss(sequences, reconstructed, masks)
             
-            # When hard mining: also compute mean-over-all loss for logging (no extra forward)
+            # Paper-style MSE: total sum sq / total count (accumulate over epoch)
+            with torch.no_grad():
+                elem_sq = self.criterion(reconstructed, sequences)
+                mask_expanded = masks.unsqueeze(-1)
+                batch_sum_sq = (elem_sq * mask_expanded).sum().item()
+                batch_count = mask_expanded.sum().item()
+                total_sum_sq += batch_sum_sq
+                total_count += batch_count
+            
+            # When hard mining: also compute mean-over-all loss for logging
             if use_hard_mining:
                 with torch.no_grad():
                     loss_mean_all = self._masked_mse_loss(
@@ -455,12 +478,20 @@ class Trainer:
         
         train_loss = total_loss / len(loader)
         train_loss_mean_all = (total_loss_mean_all / len(loader)) if use_hard_mining else None
-        return (train_loss, train_loss_mean_all)
+        train_mse_paper = total_sum_sq / total_count if total_count > 0 else 0.0
+        return (train_loss, train_loss_mean_all, train_mse_paper)
     
-    def _validate(self, loader: DataLoader) -> float:
-        """Validate model (always uses mean loss over all samples, no hard mining)."""
+    def _validate(self, loader: DataLoader) -> Tuple[float, float]:
+        """Validate model (always uses mean loss over all samples, no hard mining).
+        
+        Returns:
+            val_loss: Mean loss over batches (for early stopping / best model).
+            val_mse_paper: Paper-style MSE (total sum sq / total count over epoch), for logging only.
+        """
         self.model.eval()
         total_loss = 0.0
+        total_sum_sq = 0.0
+        total_count = 0
         
         with torch.no_grad():
             for sequences, masks in loader:
@@ -470,8 +501,18 @@ class Trainer:
                 reconstructed, _ = self.model(sequences, masks)
                 loss = self._masked_mse_loss(sequences, reconstructed, masks, use_weighted_loss=False)
                 total_loss += loss.item()
+                
+                # Paper-style MSE: total sum sq / total count
+                elem_sq = self.criterion(reconstructed, sequences)
+                mask_expanded = masks.unsqueeze(-1)
+                batch_sum_sq = (elem_sq * mask_expanded).sum().item()
+                batch_count = mask_expanded.sum().item()
+                total_sum_sq += batch_sum_sq
+                total_count += batch_count
         
-        return total_loss / len(loader)
+        val_loss = total_loss / len(loader)
+        val_mse_paper = total_sum_sq / total_count if total_count > 0 else 0.0
+        return (val_loss, val_mse_paper)
     
     def _masked_mse_loss(
         self,
